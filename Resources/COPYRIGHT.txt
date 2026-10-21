@@ -1,5 +1,9 @@
 switchyard-desktop
 Copyright 2026 switchyard-desktop contributors.
 
+Licensed under the Apache License, Version 2.0.
+See Licenses/SwitchyardDesktop/LICENSE and NOTICE. Third-party components
+retain their own licenses.
+
 This distribution is an independent utility. It is not affiliated with,
 endorsed by, or sponsored by OpenAI or NVIDIA.

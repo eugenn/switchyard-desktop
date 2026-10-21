@@ -31,6 +31,8 @@ if [ -z "$APP" ] || [ -z "$DMG" ] || [ ! -d "$APP" ] || [ ! -f "$DMG" ]; then
 fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+python3 "$ROOT/scripts/update-switchyard.py" --verify --release --check-published \
+    --manifest "$APP/Contents/Resources/switchyard-source.json"
 "$ROOT/scripts/verify-bundle.sh" "$APP"
 
 /usr/bin/codesign --verify --deep --strict --verbose=4 "$APP"

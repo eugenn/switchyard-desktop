@@ -1,0 +1,19 @@
+switchyard-desktop
+Copyright 2026 switchyard-desktop contributors.
+
+The original code and project assets in this repository are licensed under
+the Apache License, Version 2.0. Third-party components retain their own
+licenses and copyright notices.
+
+This application includes a modified snapshot of NVIDIA Switchyard:
+https://github.com/NVIDIA-NeMo/Switchyard
+Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES.
+The maintained fork is https://github.com/eugenn/Switchyard.
+See vendor/switchyard/LICENSE, vendor/switchyard/NOTICE, and
+vendor/switchyard-source.json for its license, notices, and exact provenance.
+
+The application bundles Python, LiteLLM, and other dependencies. See
+Resources/THIRD-PARTY-NOTICES.txt and the license files in the distribution.
+
+This is an independent project, not affiliated with, endorsed by, or
+sponsored by NVIDIA or OpenAI. Their names and marks belong to their owners.

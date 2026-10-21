@@ -2,16 +2,17 @@
 
 ## Ownership
 
-`~/Projects/personal/NVIDIA` is the only active Switchyard development checkout.
+The maintainer uses the sibling `../NVIDIA` as the Switchyard development checkout.
 Implement server behavior, API, routing algorithms, metrics and server tests there first.
 
 `switchyard-desktop` owns the Swift application, configuration generation, process management, integration
 checks and packaging. `vendor/switchyard/` is an imported source snapshot, not a second development
 branch. Do not edit it directly. Builds never copy sources implicitly from NVIDIA.
 
-The initial import includes tracked working-tree changes from NVIDIA because that checkout was not
-clean. `vendor/switchyard-source.json` records the base commit, whether tracked changes were included,
-and SHA-256 hashes for every imported file. Its base SHA alone is not the identity of a dirty snapshot.
+The current import includes tracked working-tree changes from NVIDIA because that checkout was not
+clean. `vendor/switchyard-source.json` records the maintained fork URL and commit, integrated NVIDIA
+upstream URL and commit, whether tracked changes were included, and SHA-256 hashes for every imported
+file. The core commit alone is not the identity of a dirty snapshot. See [release provenance](releases.md).
 Untracked files, local credentials, scratch profiles and build output are not imported.
 
 The import is a regular source snapshot, not a Git subtree merge: it does not create commits or alter
@@ -25,7 +26,8 @@ cargo build --locked --release -p switchyard-server
 cargo test --locked -p switchyard-server
 ```
 
-Run the tests for any other affected crates too. Commit reviewed server changes in NVIDIA first.
+Run the tests for any other affected crates too. Commit reviewed server changes in NVIDIA first
+and publish the commit to `eugenn/Switchyard` before using it in a public app release.
 Then update the application copy explicitly:
 
 ```sh
@@ -36,9 +38,17 @@ python3 scripts/update-switchyard.py --verify
 ```
 
 The default source is NVIDIA. `--source /path/to/checkout` supports another machine's checkout.
-An explicit `--allow-dirty` imports tracked working-tree changes for development. Prefer a clean
-reviewed server commit for release updates. The importer refuses to overwrite modifications to the
+An explicit `--allow-dirty` imports tracked working-tree changes for development. Public releases
+require a clean published core commit and reject dirty snapshots. The importer refuses to overwrite modifications to the
 existing vendor snapshot; resolve them in NVIDIA and restore the imported copy before retrying.
+
+The importer identifies remotes by URL, so both `origin` = NVIDIA / `fork` = your fork
+and `upstream` = NVIDIA / `origin` = your fork work. It does not change remotes or
+fetch. Fetch upstream intentionally before merging updates. `--upstream-ref`
+overrides the default NVIDIA remote's `main` when importing another upstream line.
+
+Run `python3 -m unittest discover -s scripts/tests -v` for importer and release-gate
+regressions. These tests use disposable local Git repositories, never the real core checkout.
 
 No reverse synchronization exists. If an app feature needs a server change, implement and test the
 server change first in NVIDIA, import it, then implement the app integration.

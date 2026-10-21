@@ -66,6 +66,13 @@ if [ -z "$OUTPUT" ] || [ -z "$SIGNING_IDENTITY" ]; then
 fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+if [ "$SIGNING_IDENTITY" != "-" ]; then
+    if [ "$HARDENED_RUNTIME" -ne 1 ]; then
+        echo "A distributable build must enable the hardened runtime." >&2
+        exit 65
+    fi
+    python3 "$ROOT/scripts/update-switchyard.py" --verify --release --check-published
+fi
 # shellcheck disable=SC1091
 . "$ROOT/Resources/AppVersion.env"
 
@@ -96,6 +103,8 @@ mkdir -p "$OUTPUT/Contents/MacOS" "$OUTPUT/Contents/Resources" "$OUTPUT/Contents
 cp "$ROOT/build/switchyard-target/release/switchyard-server" "$OUTPUT/Contents/Helpers/switchyard-server"
 cp "$ROOT/vendor/switchyard-source.json" "$OUTPUT/Contents/Resources/switchyard-source.json"
 mkdir -p "$OUTPUT/Contents/Resources/Licenses/Switchyard"
+mkdir -p "$OUTPUT/Contents/Resources/Licenses/SwitchyardDesktop"
+cp "$ROOT/LICENSE" "$ROOT/NOTICE" "$OUTPUT/Contents/Resources/Licenses/SwitchyardDesktop/"
 cp "$ROOT/vendor/switchyard/LICENSE" "$ROOT/vendor/switchyard/NOTICE" "$OUTPUT/Contents/Resources/Licenses/Switchyard/"
 python3 "$ROOT/scripts/collect-rust-licenses.py" "$OUTPUT/Contents/Resources/Licenses/Rust"
 cp "$BINARY" "$OUTPUT/Contents/MacOS/$EXECUTABLE"
@@ -113,10 +122,6 @@ cp -R "$RESOURCE_BUNDLE" "$OUTPUT/Contents/Resources/"
     "$OUTPUT/Contents/Info.plist"
 /usr/bin/plutil -lint "$OUTPUT/Contents/Info.plist" >/dev/null
 
-if [ "$SIGNING_IDENTITY" != "-" ] && [ "$HARDENED_RUNTIME" -ne 1 ]; then
-    echo "A distributable build must enable the hardened runtime." >&2
-    exit 65
-fi
 python3 "$ROOT/scripts/sign-bundle.py" "$OUTPUT" "$SIGNING_IDENTITY"
 
 /usr/bin/codesign --verify --deep --strict --verbose=2 "$OUTPUT"

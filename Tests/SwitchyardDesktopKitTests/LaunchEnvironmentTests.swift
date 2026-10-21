@@ -25,7 +25,7 @@ import Testing
 }
 
 @Test func mergedPathsIgnoreEmptySegmentsAndDeduplicateTildes() {
-    let home = NSHomeDirectory()
+    let home = UserDataLocations.home.path
     let merged = LaunchEnvironment.mergedSearchPaths(
         processPath: "::\(home)/.local/bin:",
         loginShellPath: "~/.local/bin",
@@ -81,4 +81,9 @@ import Testing
     #expect(environment["PATH"]?.contains("/usr/bin") == true)
     // Tildes are expanded, or the child process cannot use the entry.
     #expect(environment["PATH"]?.contains("~") == false)
+    #expect(environment["PATH"]?.contains(UserDataLocations.testSandbox.path) == true)
+}
+
+@Test func testsNeverLaunchTheUsersLoginShell() {
+    #expect(LaunchEnvironment.loginShellPath() == nil)
 }

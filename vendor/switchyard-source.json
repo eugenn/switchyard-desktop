@@ -1,6 +1,9 @@
 {
-  "repository": "https://github.com/NVIDIA-NeMo/Switchyard.git",
-  "base_commit": "c6bdef7755bbb8efa63f8b251b7305a38b69344c",
+  "schema_version": 2,
+  "repository": "https://github.com/eugenn/Switchyard.git",
+  "commit": "c6bdef7755bbb8efa63f8b251b7305a38b69344c",
+  "upstream_repository": "https://github.com/NVIDIA-NeMo/Switchyard.git",
+  "upstream_commit": "9eb962fed6b5ce3b5437fb140c89f9ed1eb6939a",
   "includes_tracked_worktree_changes": true,
   "files": {
     ".cargo/config.toml": "0cb56e1bbc9542c57805e4ff0d98c4e13dc90edfe1a506db9d0385cee41e9096",

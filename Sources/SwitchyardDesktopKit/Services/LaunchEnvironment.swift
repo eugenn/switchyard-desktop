@@ -27,7 +27,10 @@ package enum LaunchEnvironment {
 
     /// Directories searched for a tool, in order, without duplicates.
     package static var searchPaths: [String] {
-        Cache.shared.searchPaths {
+        if UserDataLocations.isUnderTest {
+            return mergedSearchPaths(processPath: nil, loginShellPath: nil)
+        }
+        return Cache.shared.searchPaths {
             mergedSearchPaths(
                 processPath: ProcessInfo.processInfo.environment["PATH"],
                 loginShellPath: loginShellPath()
@@ -84,6 +87,9 @@ package enum LaunchEnvironment {
     /// missing, fails, or takes too long — the conventional directories then
     /// have to be enough.
     package static func loginShellPath(timeout: TimeInterval = 4) -> String? {
+        // A login shell reads user-owned startup files and may execute arbitrary
+        // local setup. Tests use conventional paths and injected executables.
+        guard !UserDataLocations.isUnderTest else { return nil }
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         guard FileManager.default.isExecutableFile(atPath: shell) else { return nil }
 
@@ -127,7 +133,12 @@ package enum LaunchEnvironment {
     }
 
     private static func expanded(_ directory: String) -> String {
-        (directory as NSString).expandingTildeInPath
+        if directory == "~" { return UserDataLocations.home.path }
+        if directory.hasPrefix("~/") {
+            return UserDataLocations.home.appendingPathComponent(String(directory.dropFirst(2))).path
+        }
+        if UserDataLocations.isUnderTest { return directory }
+        return (directory as NSString).expandingTildeInPath
     }
 
     /// Asking the login shell costs a process launch, so the answer is resolved

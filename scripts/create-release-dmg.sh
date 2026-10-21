@@ -37,6 +37,9 @@ APP_NAME="switchyard-desktop.app"
 VOLNAME="switchyard-desktop"
 ARTIFACT_STEM="switchyard-desktop"
 
+# Fail before building, accessing signing credentials or contacting Apple.
+python3 "$ROOT/scripts/update-switchyard.py" --verify --release --check-published
+
 : "${SWITCHYARD_DESKTOP_SIGNING_IDENTITY:?Set SWITCHYARD_DESKTOP_SIGNING_IDENTITY to a Developer ID Application identity.}"
 : "${SWITCHYARD_DESKTOP_NOTARY_PROFILE:?Set SWITCHYARD_DESKTOP_NOTARY_PROFILE to a notarytool keychain profile.}"
 

@@ -4,6 +4,11 @@ Native macOS app for routing Codex requests between models with NVIDIA Switchyar
 Configure models and routing, then review request statistics. Switchyard and the
 Python/LiteLLM runtime are bundled with the app.
 
+This is an independent community project using a
+[maintained Switchyard fork](https://github.com/eugenn/Switchyard), based on
+[NVIDIA Switchyard](https://github.com/NVIDIA-NeMo/Switchyard). It is not affiliated
+with or endorsed by NVIDIA or OpenAI.
+
 ![Statistics screen](images/ui.png)
 
 ## Quick start
@@ -38,3 +43,18 @@ open build/switchyard-desktop.app
 
 Then follow the setup steps above. The build downloads and bundles the required
 runtimes; nothing is installed at app startup.
+
+## Development and contributions
+
+The app builds from the checked-in core snapshot; a separate core checkout is
+only needed to develop server changes. Start with [CONTRIBUTING.md](CONTRIBUTING.md)
+and the [development workflow](docs/development.md). See also
+[core fork maintenance](docs/core-fork.md), [releases and provenance](docs/releases.md),
+and [GitHub maintainer settings](docs/github.md).
+
+## License
+
+Original application code and project assets are licensed under
+[Apache-2.0](LICENSE). Third-party components retain their own licenses; see
+[NOTICE](NOTICE) and [third-party notices](Resources/THIRD-PARTY-NOTICES.txt).
+Report vulnerabilities using [SECURITY.md](SECURITY.md).

@@ -1,6 +1,6 @@
 SWITCHYARD_DESKTOP THIRD-PARTY NOTICES
 
-Last updated: September 11, 2026
+Last updated: October 21, 2026
 
 Bundled source dependency
 -------------------------
@@ -46,8 +46,8 @@ toolchain rather than redistributed as third-party source packages.
 External integrations not bundled with switchyard-desktop
 ---------------------------------------------------
 
-- OpenAI Codex is configured by the user and is not included in the Model
-  Router app or DMG.
+- OpenAI Codex is configured by the user and is not included in the
+  switchyard-desktop app or DMG.
 
 switchyard-desktop is an independent utility. It is not affiliated with, endorsed
 by, or sponsored by OpenAI or NVIDIA. OpenAI, Codex, NVIDIA, and Switchyard
@@ -56,8 +56,10 @@ names and marks belong to their respective owners.
 Bundled servers and runtime
 ---------------------------
 Switchyard 0.3.0, NVIDIA Corporation & Affiliates, Apache-2.0.
-Imported sources may include changes relative to the base commit; the exact
-source inventory is recorded in switchyard-source.json. Full LICENSE and
+The maintained fork is https://github.com/eugenn/Switchyard. The fork commit,
+integrated NVIDIA upstream commit, dirty flag and exact source hashes are
+recorded in switchyard-source.json. Public releases require a clean snapshot
+matching the published fork commit. Full LICENSE and
 NOTICE are in Licenses/Switchyard, with Rust dependency texts and an index
 in Licenses/Rust.
 

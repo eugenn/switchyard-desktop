@@ -1,5 +1,29 @@
 # Local build validation
 
+## Open-source preparation — 2026-10-21
+
+- Imported schema 2 provenance from the sibling NVIDIA checkout: maintained fork
+  commit and integrated NVIDIA upstream commit are separate. All 647 source file
+  hashes remain unchanged. The existing dirty flag remains true.
+- 13 Python importer/release-gate tests passed using temporary Git fixtures,
+  including committed-byte fetching and early rejection at all release entry points.
+- `swift test --force-resolved-versions` passed 445 library and 2 application
+  tests with Xcode 27.1. User-data tests no longer read real account files; test
+  executable discovery does not launch the user's login shell.
+- `scripts/build-dev-app.sh release` built and verified the complete app, including
+  signatures, native deployment targets, runtime imports and offline server smoke
+  tests. Bundled Apache license, notices and source manifest match the checkout.
+- The current snapshot is rejected by `--verify --release`, as expected. No public
+  DMG or notarization was attempted.
+- GitHub YAML parses, local documentation links resolve, shell syntax and
+  `git diff --check` pass. The GitHub workflow has not run: its files remain local.
+- GitHub visibility, branch protection, outside-contributor workflow approval,
+  secret scanning/push protection and private vulnerability reporting were checked
+  through the API. See [GitHub maintenance](github.md) for bootstrap details.
+
+Logs: `build/open-source-swift-test.log`, `build/open-source-swift-build.log`,
+`build/open-source-package.log`. No commits, pushes or GitHub releases were made.
+
 ## Single application — 2026-10-21
 
 `SwitchyardDesktopApp` is the only executable product. It opens Statistics on
