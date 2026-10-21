@@ -77,7 +77,7 @@ private func lifecycleTestProfile() -> RoutingProfile {
     }
     let config = directory.appendingPathComponent("config.toml")
     try "model = \"gpt-5\"\n".write(to: config, atomically: true, encoding: .utf8)
-    let profilePath = directory.appendingPathComponent("switchyard-desktop.config.toml")
+    let profilePath = directory.appendingPathComponent("switch.config.toml")
     try CodexProfileWriter.install(profile: lifecycleTestProfile(), profilePath: profilePath)
     let store = LifecycleSessionStore()
     try store.save(ActiveRoutingSession(
@@ -121,7 +121,7 @@ private func lifecycleTestProfile() -> RoutingProfile {
     let config = directory.appendingPathComponent("config.toml")
     let original = "model = \"gpt-5\"\nmodel_provider = \"openai\"\n"
     try original.write(to: config, atomically: true, encoding: .utf8)
-    let profilePath = directory.appendingPathComponent("switchyard-desktop.config.toml")
+    let profilePath = directory.appendingPathComponent("switch.config.toml")
     try CodexProfileWriter.install(profile: lifecycleTestProfile(), profilePath: profilePath)
     let store = LifecycleSessionStore()
     try store.save(ActiveRoutingSession(

@@ -125,7 +125,7 @@ private func routedModel(in directory: URL, port: Int) async throws -> WizardMod
         readinessChecker: SelectionReadyChecker(binary: try selectionTestServer(in: directory)),
         routingConfigPath: directory.appendingPathComponent("routes.toml"),
         codexConfigPath: codexConfig,
-        codexProfilePath: directory.appendingPathComponent("switchyard-desktop.config.toml"),
+        codexProfilePath: directory.appendingPathComponent("switch.config.toml"),
         sessionStore: SelectionSessionStore(),
         // Every store is injected: a default one would reach for a location
         // this process shares with the running app.
@@ -181,7 +181,7 @@ private func routedModel(in directory: URL, port: Int) async throws -> WizardMod
 }
 
 /// A deleted profile is the one drift the old design could not have: the route
-/// runs, but `codex --profile switchyard-desktop` has nothing to resolve.
+/// runs, but `codex --profile switch` has nothing to resolve.
 @MainActor
 @Test func aDeletedProfileIsReportedAsAMissingRoute() async throws {
     let directory = try selectionTestDirectory()
@@ -255,7 +255,7 @@ private func routedModel(in directory: URL, port: Int) async throws -> WizardMod
 @Test func generatingOverAMalformedProfileReplacesItWholesale() throws {
     let directory = try selectionTestDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
-    let profilePath = directory.appendingPathComponent("switchyard-desktop.config.toml")
+    let profilePath = directory.appendingPathComponent("switch.config.toml")
     try "model = \"unterminated\nmodel_provider = switchyard-desktop\n"
         .write(to: profilePath, atomically: true, encoding: .utf8)
 
@@ -275,7 +275,7 @@ private func routedModel(in directory: URL, port: Int) async throws -> WizardMod
     defer { try? FileManager.default.removeItem(at: directory) }
     let config = directory.appendingPathComponent("config.toml")
     try userOwnedConfig.write(to: config, atomically: true, encoding: .utf8)
-    let profilePath = directory.appendingPathComponent("switchyard-desktop.config.toml")
+    let profilePath = directory.appendingPathComponent("switch.config.toml")
     try CodexProfileWriter.install(profile: selectionProfile(), profilePath: profilePath)
     try String(contentsOf: profilePath, encoding: .utf8)
         .replacingOccurrences(of: "model = \"switchyard-desktop\"", with: "model = \"gpt-5.6-sol\"")
@@ -310,7 +310,7 @@ private func routedModel(in directory: URL, port: Int) async throws -> WizardMod
 @Test func aProfilePointedAtAnotherProviderIsNotThisAppsToRemove() throws {
     let directory = try selectionTestDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
-    let profilePath = directory.appendingPathComponent("switchyard-desktop.config.toml")
+    let profilePath = directory.appendingPathComponent("switch.config.toml")
     try CodexProfileWriter.install(profile: selectionProfile(), profilePath: profilePath)
     try String(contentsOf: profilePath, encoding: .utf8)
         .replacingOccurrences(

@@ -25,7 +25,7 @@ to the models you want to use.
 5. Run Codex through the route:
 
    ```sh
-   codex --profile switchyard-desktop
+   codex --profile switch
    ```
 
 Keep the app running while using the route. Use **Stop routing** when finished.

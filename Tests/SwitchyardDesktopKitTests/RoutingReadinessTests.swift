@@ -56,7 +56,7 @@ private func availableTestPort() -> Int {
         profile: preflightProfile(port: availableTestPort()),
         binaryPathOverride: binary.path,
         routingConfigPath: directory.appendingPathComponent("routes.toml"),
-        codexProfilePath: directory.appendingPathComponent("switchyard-desktop.config.toml")
+        codexProfilePath: directory.appendingPathComponent("switch.config.toml")
     )
 
     #expect(readiness.resolvedBinaryPath == binary)
@@ -77,7 +77,7 @@ private func availableTestPort() -> Int {
         profile: preflightProfile(port: availableTestPort()),
         binaryPathOverride: "",
         routingConfigPath: directory.appendingPathComponent("routes.toml"),
-        codexProfilePath: directory.appendingPathComponent("switchyard-desktop.config.toml")
+        codexProfilePath: directory.appendingPathComponent("switch.config.toml")
     )
 
     #expect(readiness.resolvedBinaryPath == nil)
@@ -102,7 +102,7 @@ private func availableTestPort() -> Int {
         profile: profile,
         binaryPathOverride: binary.path,
         routingConfigPath: directory.appendingPathComponent("routes.toml"),
-        codexProfilePath: directory.appendingPathComponent("switchyard-desktop.config.toml")
+        codexProfilePath: directory.appendingPathComponent("switch.config.toml")
     )
 
     #expect(!readiness.endpoint.isPassed)
@@ -156,7 +156,7 @@ private struct ReadyModelDiscovery: CodexModelDiscovering {
     let codexConfig = directory.appendingPathComponent("config.toml")
     let original = "model = \"original\"\nmodel_provider = \"existing\"\n"
     try original.write(to: codexConfig, atomically: true, encoding: .utf8)
-    let codexProfile = directory.appendingPathComponent("switchyard-desktop.config.toml")
+    let codexProfile = directory.appendingPathComponent("switch.config.toml")
 
     let model = WizardModel(
         readinessChecker: FailingReadinessChecker(),
@@ -191,7 +191,7 @@ private struct ReadyModelDiscovery: CodexModelDiscovering {
     let codexConfig = directory.appendingPathComponent("config.toml")
     let original = "model = \"original\"\nmodel_provider = \"existing\"\n"
     try original.write(to: codexConfig, atomically: true, encoding: .utf8)
-    let codexProfile = directory.appendingPathComponent("switchyard-desktop.config.toml")
+    let codexProfile = directory.appendingPathComponent("switch.config.toml")
 
     let model = WizardModel(
         readinessChecker: FailingReadinessChecker(),
@@ -262,7 +262,7 @@ private func imageCapablePreflightProfile(port: Int) -> RoutingProfile {
         profile: imageCapablePreflightProfile(port: availableTestPort()),
         binaryPathOverride: binary.path,
         routingConfigPath: directory.appendingPathComponent("routes.toml"),
-        codexProfilePath: directory.appendingPathComponent("switchyard-desktop.config.toml")
+        codexProfilePath: directory.appendingPathComponent("switch.config.toml")
     )
 
     // The route loses image input rather than the whole apply failing.
@@ -283,7 +283,7 @@ private func imageCapablePreflightProfile(port: Int) -> RoutingProfile {
         profile: imageCapablePreflightProfile(port: availableTestPort()),
         binaryPathOverride: binary.path,
         routingConfigPath: directory.appendingPathComponent("routes.toml"),
-        codexProfilePath: directory.appendingPathComponent("switchyard-desktop.config.toml")
+        codexProfilePath: directory.appendingPathComponent("switch.config.toml")
     )
 
     #expect(readiness.dryRun.isPassed)
@@ -301,7 +301,7 @@ private func imageCapablePreflightProfile(port: Int) -> RoutingProfile {
         profile: imageCapablePreflightProfile(port: availableTestPort()),
         binaryPathOverride: binary.path,
         routingConfigPath: directory.appendingPathComponent("routes.toml"),
-        codexProfilePath: directory.appendingPathComponent("switchyard-desktop.config.toml")
+        codexProfilePath: directory.appendingPathComponent("switch.config.toml")
     )
 
     #expect(readiness.dryRun.isPassed)
@@ -319,7 +319,7 @@ private func imageCapablePreflightProfile(port: Int) -> RoutingProfile {
         profile: RoutingProfile(algorithm: .stageRouter),
         binaryPathOverride: "",
         routingConfigPath: directory.appendingPathComponent("routes.toml"),
-        codexProfilePath: directory.appendingPathComponent("switchyard-desktop.config.toml")
+        codexProfilePath: directory.appendingPathComponent("switch.config.toml")
     )
     #expect(!readiness.isReady)
     #expect(readiness.upstream.message.contains("runtime"))
@@ -344,7 +344,7 @@ private func imageCapablePreflightProfile(port: Int) -> RoutingProfile {
         profile: profile,
         binaryPathOverride: binary.path,
         routingConfigPath: directory.appendingPathComponent("routes.toml"),
-        codexProfilePath: directory.appendingPathComponent("switchyard-desktop.config.toml")
+        codexProfilePath: directory.appendingPathComponent("switch.config.toml")
     )
 
     #expect(readiness.upstream.isPassed)

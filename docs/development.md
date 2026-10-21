@@ -151,5 +151,5 @@ A bundle check validates signatures, runtime dependencies, Switchyard dry-run an
 minimal environment, then starts both packaged servers with a temporary HOME and checks health/model discovery without inference. Also mount the DMG, copy the app to a path containing spaces and verify it there.
 Do not claim clean-account installation, authenticated inference or notarization based on unit tests.
 
-Before publishing, test browser sign-in, Start, a real request from `codex --profile switchyard-desktop`,
+Before publishing, test browser sign-in, Start, a real request from `codex --profile switch`,
 closing/reopening the window, Stop, quit and crash recovery. Production signing credentials stay outside the repository.

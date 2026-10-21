@@ -35,7 +35,7 @@ private let userConfig = "model = \"original\"\nmodel_provider = \"original_prov
 private func seedCodexHome(in directory: URL) throws -> (config: URL, profile: URL) {
     let config = directory.appendingPathComponent("config.toml")
     try userConfig.write(to: config, atomically: true, encoding: .utf8)
-    return (config, directory.appendingPathComponent("switchyard-desktop.config.toml"))
+    return (config, directory.appendingPathComponent("switch.config.toml"))
 }
 
 /// A launch that finds a profile left behind by an unclean shutdown removes it
@@ -297,7 +297,7 @@ private func seedCodexHome(in directory: URL) throws -> (config: URL, profile: U
     let model = WizardModel(
         routingConfigPath: directory.appendingPathComponent("routes.toml"),
         codexConfigPath: config,
-        codexProfilePath: directory.appendingPathComponent("switchyard-desktop.config.toml"),
+        codexProfilePath: directory.appendingPathComponent("switch.config.toml"),
         sessionStore: ActiveRoutingSessionStore(fileURL: recordURL)
     )
 

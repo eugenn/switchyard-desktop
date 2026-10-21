@@ -1,11 +1,11 @@
 import Foundation
 
 /// What the generated Codex profile layer selects at this moment: the two keys
-/// Start writes into `$CODEX_HOME/switchyard-desktop.config.toml`.
+/// Start writes into `$CODEX_HOME/switch.config.toml`.
 ///
 /// Only this app writes that file, so the selection normally never moves. It can
 /// still be edited or deleted by hand, and a session started with
-/// `codex --profile switchyard-desktop` then asks the proxy for a model the running
+/// `codex --profile switch` then asks the proxy for a model the running
 /// route does not serve, or bypasses the proxy entirely.
 package struct CodexRouteSelection: Equatable, Sendable {
     package let model: String?
@@ -27,7 +27,7 @@ package struct CodexRouteSelection: Equatable, Sendable {
 /// form breaks a routed Codex session, and each is repaired by generating the
 /// file again.
 package enum CodexRouteDrift: Equatable, Sendable {
-    /// The generated file is no longer on disk, so `--profile switchyard-desktop`
+    /// The generated file is no longer on disk, so `--profile switch`
     /// fails to resolve a route at all.
     case profileMissing
     /// The layer still points at the proxy but asks it for a different model.

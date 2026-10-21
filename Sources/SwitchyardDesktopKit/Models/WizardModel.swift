@@ -1062,7 +1062,7 @@ package final class WizardModel {
             return
         }
         // A file that cannot be read at all is a missing route, not an unknown
-        // one: `--profile switchyard-desktop` has nothing to resolve either way.
+        // one: `--profile switch` has nothing to resolve either way.
         // Spelled out rather than coalesced: a selection that matches the route
         // also yields nil, and the two must not collapse into one answer.
         let drift: CodexRouteDrift?
@@ -1179,7 +1179,7 @@ package final class WizardModel {
     /// Tidies up for a termination this app cannot turn into a prompt: a
     /// log-out, a Force Quit, or a quit arriving while no window can host the
     /// confirmation. It removes the generated profile so a later
-    /// `codex --profile switchyard-desktop` cannot reach a stopped proxy.
+    /// `codex --profile switch` cannot reach a stopped proxy.
     ///
     /// Nothing here is load-bearing. The file is this app's own, the user's
     /// Codex configuration is untouched either way, and a termination this never

@@ -4,13 +4,13 @@ import Foundation
 /// formed.
 ///
 /// Their ownership is deliberately different. `config.toml` is the user's: it is
-/// read for discovery and never written. `switchyard-desktop.config.toml` is this
+/// read for discovery and never written. `switch.config.toml` is this
 /// app's own layer — Codex loads `$CODEX_HOME/<name>.config.toml` on top of the
 /// user's configuration when a session starts as `codex --profile <name>`, so
 /// routing is installed by adding a file instead of editing one.
 package enum CodexLocations {
     /// The `--profile` name a routed Codex session is started with.
-    package static let profileName = "switchyard-desktop"
+    package static let profileName = "switch"
 
     /// What the user types to start a routed session.
     package static var launchCommand: String { "codex --profile \(profileName)" }

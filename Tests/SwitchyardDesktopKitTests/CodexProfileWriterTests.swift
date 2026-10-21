@@ -28,7 +28,7 @@ private func makeCodexHome(userConfig: String? = nil) throws -> URL {
             encoding: .utf8
         )
     }
-    return directory.appendingPathComponent("switchyard-desktop.config.toml")
+    return directory.appendingPathComponent("switch.config.toml")
 }
 
 /// Shaped like the real file the app must never touch: top-level keys, a
@@ -84,7 +84,7 @@ trust_level = "trusted"
     let siblings = try FileManager.default.contentsOfDirectory(
         atPath: profilePath.deletingLastPathComponent().path
     )
-    #expect(Set(siblings) == ["config.toml", "switchyard-desktop.config.toml"])
+    #expect(Set(siblings) == ["config.toml", "switch.config.toml"])
 }
 
 @Test func installIsIdempotentAndReplacesAnEarlierGeneration() throws {
@@ -112,7 +112,7 @@ trust_level = "trusted"
         .appendingPathComponent(".codex", isDirectory: true)
     defer { try? FileManager.default.removeItem(at: home.deletingLastPathComponent()) }
 
-    let profilePath = home.appendingPathComponent("switchyard-desktop.config.toml")
+    let profilePath = home.appendingPathComponent("switch.config.toml")
     try CodexProfileWriter.install(profile: sampleProfile(), profilePath: profilePath)
 
     #expect(CodexProfileWriter.isInstalled(profilePath: profilePath))
@@ -235,16 +235,16 @@ trust_level = "trusted"
     )
     #expect(
         CodexLocations.profileURL(codexHome: nil, userHome: home).path
-            == "/tmp/example-user/.codex/switchyard-desktop.config.toml"
+            == "/tmp/example-user/.codex/switch.config.toml"
     )
     #expect(
         CodexLocations.profileURL(codexHome: "/tmp/custom-codex", userHome: home).path
-            == "/tmp/custom-codex/switchyard-desktop.config.toml"
+            == "/tmp/custom-codex/switch.config.toml"
     )
 }
 
 @Test func theLaunchCommandNamesTheGeneratedProfile() {
-    #expect(CodexLocations.launchCommand == "codex --profile \(CodexLocations.profileName)")
+    #expect(CodexLocations.launchCommand == "codex --profile switch")
     #expect(
         CodexProfileWriter.defaultProfileURL.lastPathComponent
             == "\(CodexLocations.profileName).config.toml"
@@ -276,7 +276,7 @@ trust_level = "trusted"
 
 @Test func manualSnippetNeverMentionsTheProfileFlag() {
     // This text is pasted into config.toml directly, so it must not imply the
-    // reader still needs `--profile switchyard-desktop` to get it.
+    // reader still needs `--profile switch` to get it.
     let snippet = CodexProfileWriter.manualConfigSnippet(profile: sampleProfile())
     #expect(!snippet.contains("--profile"))
 }

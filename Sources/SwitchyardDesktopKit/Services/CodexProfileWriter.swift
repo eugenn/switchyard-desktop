@@ -1,7 +1,7 @@
 import Foundation
 import TOMLKit
 
-/// Generates and removes `$CODEX_HOME/switchyard-desktop.config.toml`, the Codex
+/// Generates and removes `$CODEX_HOME/switch.config.toml`, the Codex
 /// configuration layer this app owns.
 ///
 /// Codex layers `<name>.config.toml` over the user's own configuration when a
@@ -45,7 +45,7 @@ package enum CodexProfileWriter {
         }
     }
 
-    /// `$CODEX_HOME/switchyard-desktop.config.toml`, defaulting under `~/.codex`.
+    /// `$CODEX_HOME/switch.config.toml`, defaulting under `~/.codex`.
     package static var defaultProfileURL: URL { CodexLocations.defaultProfileURL }
 
     // MARK: - Install
@@ -102,7 +102,7 @@ package enum CodexProfileWriter {
     /// This app never writes this text anywhere: copying it is the user's own
     /// edit, to their own file, and it makes the route their Codex default
     /// everywhere, not only in Desktop — every session that does not select a
-    /// different profile picks it up, `codex --profile switchyard-desktop` included.
+    /// different profile picks it up, `codex --profile switch` included.
     /// Pure, like `render(profile:)`, and exposed for the same reasons.
     package static func manualConfigSnippet(profile: RoutingProfile) -> String {
         var lines = [

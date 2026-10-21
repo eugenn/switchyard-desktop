@@ -5,7 +5,7 @@ import TOMLKit
 /// does: edit `~/.codex/config.toml` in place.
 ///
 /// Reached only by upgrading while such a route was active. Today's app adds its
-/// own `switchyard-desktop.config.toml` instead, so this runs once, at the first
+/// own `switch.config.toml` instead, so this runs once, at the first
 /// launch after the upgrade, and then the record is gone for good.
 package enum LegacyCodexConfigRestore {
     package enum Outcome: Equatable {

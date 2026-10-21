@@ -6,7 +6,7 @@ import Foundation
 /// It exists for tidiness, not for safety. The layer it names is this app's own
 /// file: a run that never gets to delete it leaves the user's Codex
 /// configuration untouched, and only a session started with
-/// `codex --profile switchyard-desktop` would notice. The next launch removes it.
+/// `codex --profile switch` would notice. The next launch removes it.
 package struct ActiveRoutingSession: Codable, Equatable, Sendable {
     package let routingConfigPath: URL
     package let codexProfilePath: URL

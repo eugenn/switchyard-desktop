@@ -71,5 +71,5 @@ import Testing
     let explicitProfile = CodexLocations.profileURL(
         codexHome: "/somewhere/else", userHome: UserDataLocations.home
     )
-    #expect(explicitProfile.path == "/somewhere/else/switchyard-desktop.config.toml")
+    #expect(explicitProfile.path == "/somewhere/else/switch.config.toml")
 }
