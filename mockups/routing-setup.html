@@ -1,0 +1,789 @@
+<title>Routing Roles Setup</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #080a0a;
+    --win: #0e1211;
+    --panel: #121615;
+    --panel-2: #181d1b;
+    --sunk: #0a0d0c;
+    --line: rgba(224, 240, 232, 0.075);
+    --line-2: rgba(224, 240, 232, 0.15);
+    --ink: #e9f1ec;
+    --ink-2: #9dada6;
+    --ink-3: #6d7d76;
+    --accent: #4fc98a;
+    --accent-dim: #2fa96f;
+    --warn: #fab219;
+    --good: #0ca30c;
+    --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 13px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+    padding: 28px 20px 40px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .window {
+    width: 100%;
+    max-width: 940px;
+    background: var(--win);
+    border: 1px solid var(--line-2);
+    border-radius: 11px;
+    box-shadow: 0 24px 60px -18px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+  }
+
+  /* ---------- window chrome ---------- */
+
+  .titlebar {
+    height: 34px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #151a18, #101413);
+  }
+  .lights { display: flex; gap: 6px; }
+  .lights i { width: 10px; height: 10px; border-radius: 50%; }
+  .lights i:nth-child(1) { background: #e05c51; }
+  .lights i:nth-child(2) { background: #e0a63f; }
+  .lights i:nth-child(3) { background: #4fb555; }
+  .titlebar .name { font-size: 12px; font-weight: 500; color: var(--ink-2); }
+  .titlebar .name b { color: var(--ink); font-weight: 600; }
+  .titlebar .rt {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--ink-3);
+  }
+
+  /* ---------- step indicator ---------- */
+
+  .steps {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--line);
+  }
+  .step { display: flex; align-items: center; gap: 7px; }
+  .step .n {
+    width: 18px;
+    height: 18px;
+    flex: none;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-family: var(--mono);
+    font-size: 10px;
+    background: rgba(224, 240, 232, 0.08);
+    color: var(--ink-3);
+  }
+  .step .t { font-size: 12px; color: var(--ink-3); }
+  .step.done .n { background: rgba(79, 201, 138, 0.18); color: var(--accent); }
+  .step.done .t { color: var(--ink-2); }
+  .step.now .n { background: var(--accent-dim); color: #04140c; font-weight: 500; }
+  .step.now .t { color: var(--ink); font-weight: 500; }
+  .steps .bar {
+    flex: 1;
+    height: 1px;
+    background: var(--line);
+    min-width: 12px;
+  }
+
+  /* ---------- header band ---------- */
+
+  .head { padding: 16px 18px 12px; }
+  .head h1 {
+    margin: 0;
+    font-size: 19px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  .head p {
+    margin: 4px 0 0;
+    max-width: 62ch;
+    font-size: 12.5px;
+    color: var(--ink-2);
+  }
+
+  /* ---------- two-column body ---------- */
+
+  .cols {
+    display: grid;
+    grid-template-columns: 292px 1fr;
+    align-items: start;
+  }
+  .left {
+    padding: 4px 18px 18px;
+    border-right: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .right {
+    padding: 4px 18px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+  }
+
+  h2 {
+    margin: 0 0 8px;
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+  h2 .of { text-transform: none; letter-spacing: 0; color: var(--ink-3); }
+
+  .hint {
+    font-size: 11.5px;
+    color: var(--ink-3);
+    max-width: 60ch;
+  }
+
+  /* ---------- algorithm options ---------- */
+
+  .vh {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .options { display: flex; flex-direction: column; gap: 8px; }
+
+  .opt {
+    display: grid;
+    grid-template-columns: 15px 1fr;
+    gap: 9px;
+    padding: 10px 11px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    cursor: pointer;
+  }
+  .opt:hover { background: var(--panel-2); }
+  .opt .radio {
+    margin-top: 2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 1.5px solid var(--ink-3);
+  }
+  .opt .nm { display: block; font-size: 13px; font-weight: 600; }
+  .opt .sm {
+    display: block;
+    margin-top: 2px;
+    font-size: 11.5px;
+    color: var(--ink-2);
+  }
+  .opt .cost {
+    margin-top: 7px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--line-2);
+    color: var(--ink-2);
+  }
+  .opt .cost.paid { border-color: rgba(250, 178, 25, 0.4); color: var(--warn); }
+
+  /* selection + branch switching, driven by the two radios */
+
+  #alg-stage:checked ~ .cols .opt.stage,
+  #alg-class:checked ~ .cols .opt.classifier {
+    border-color: rgba(79, 201, 138, 0.45);
+    background: rgba(79, 201, 138, 0.09);
+  }
+  #alg-stage:checked ~ .cols .opt.stage .radio,
+  #alg-class:checked ~ .cols .opt.classifier .radio {
+    border-color: var(--accent);
+    background: radial-gradient(circle, var(--accent) 0 4px, transparent 4.5px);
+  }
+  #alg-stage:focus-visible ~ .cols .opt.stage,
+  #alg-class:focus-visible ~ .cols .opt.classifier {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .branch { display: none; flex-direction: column; gap: 12px; }
+  #alg-stage:checked ~ .cols .branch.stage { display: flex; }
+  #alg-class:checked ~ .cols .branch.classifier { display: flex; }
+  .foot-state { display: none; }
+  #alg-stage:checked ~ .footer .foot-state.stage { display: flex; }
+  #alg-class:checked ~ .footer .foot-state.classifier { display: flex; }
+
+  /* ---------- discovered models ---------- */
+
+  .discovery { border-top: 1px solid var(--line); padding-top: 12px; }
+  .models { display: flex; flex-direction: column; gap: 3px; }
+  .models li {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-2);
+    list-style: none;
+  }
+  .models li .tag {
+    font-size: 9px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    border: 1px solid var(--line-2);
+    border-radius: 3px;
+    padding: 0 4px;
+  }
+  ul.models { margin: 0; padding: 0; }
+
+  .refresh {
+    margin-top: 10px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--ink-2);
+    background: none;
+    border: 1px solid var(--line-2);
+    border-radius: 5px;
+    padding: 3px 8px;
+    cursor: pointer;
+  }
+  .refresh:hover { color: var(--ink); background: var(--panel-2); }
+  .refresh svg { width: 11px; height: 11px; }
+  .src {
+    margin-top: 8px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-3);
+  }
+
+  /* ---------- role rows ---------- */
+
+  .roles { display: flex; flex-direction: column; gap: 4px; }
+
+  .role {
+    display: grid;
+    grid-template-columns: 14px 18px 1fr 216px;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+  }
+  .role:hover { background: var(--panel-2); }
+  .role .grip { color: #4a534f; cursor: grab; }
+  .role .grip svg { width: 10px; height: 14px; display: block; }
+  .role .idx {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--ink-3);
+    text-align: center;
+  }
+  .role .who { min-width: 0; }
+  .role .nm {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12.5px;
+    font-weight: 500;
+  }
+  .role .nm .edit {
+    border-bottom: 1px dashed rgba(224, 240, 232, 0.22);
+    padding-bottom: 1px;
+  }
+  .role .sm {
+    display: block;
+    font-size: 11px;
+    color: var(--ink-3);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .role.fixed .grip { visibility: hidden; }
+
+  .flag {
+    font-family: var(--mono);
+    font-size: 8.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 1px 5px;
+    border-radius: 3px;
+    border: 1px solid rgba(79, 201, 138, 0.35);
+    color: var(--accent);
+    white-space: nowrap;
+  }
+  .flag.fallback { border-color: var(--line-2); color: var(--ink-2); }
+
+  select {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 100%;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink);
+    background: var(--sunk);
+    border: 1px solid var(--line-2);
+    border-radius: 6px;
+    padding: 5px 24px 5px 9px;
+    cursor: pointer;
+    background-image: linear-gradient(45deg, transparent 50%, var(--ink-3) 50%),
+      linear-gradient(135deg, var(--ink-3) 50%, transparent 50%);
+    background-position: right 12px center, right 8px center;
+    background-size: 4px 4px, 4px 4px;
+    background-repeat: no-repeat;
+  }
+  select:hover { border-color: rgba(224, 240, 232, 0.28); }
+  select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  select.empty { color: var(--warn); border-color: rgba(250, 178, 25, 0.45); }
+
+  .role.needs { border-color: rgba(250, 178, 25, 0.3); }
+  .needline {
+    grid-column: 3 / -1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--warn);
+  }
+  .needline svg { width: 11px; height: 11px; flex: none; }
+
+  .addrow { display: flex; align-items: center; gap: 10px; }
+  .ghost {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--ink-2);
+    background: none;
+    border: 1px dashed var(--line-2);
+    border-radius: 6px;
+    padding: 4px 9px;
+    cursor: pointer;
+  }
+  .ghost:hover { color: var(--ink); border-color: rgba(224, 240, 232, 0.3); }
+  .ghost svg { width: 11px; height: 11px; }
+  .count { font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); }
+
+  /* ---------- classifier choices ---------- */
+
+  .choices {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    padding: 11px 12px 12px;
+  }
+  .choices .pair {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 8px;
+  }
+  .field label {
+    display: block;
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin-bottom: 4px;
+  }
+  .field .why { margin-top: 4px; font-size: 10.5px; color: var(--ink-3); }
+
+  /* ---------- footer ---------- */
+
+  .footer {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 11px 18px;
+    border-top: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.012);
+  }
+  .foot-state { align-items: center; gap: 7px; font-size: 12px; }
+  .foot-state svg { width: 13px; height: 13px; flex: none; }
+  .foot-state.classifier { color: var(--warn); }
+  .foot-state.stage { color: var(--ink-2); }
+  .foot-state.stage b { color: var(--accent); font-weight: 500; }
+  .btns { margin-left: auto; display: flex; gap: 8px; }
+  .btn {
+    font-family: var(--sans);
+    font-size: 12.5px;
+    padding: 5px 14px;
+    border-radius: 6px;
+    border: 1px solid var(--line-2);
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--ink);
+    cursor: pointer;
+  }
+  .btn:hover { background: rgba(255, 255, 255, 0.07); }
+  .btn.primary {
+    background: var(--accent-dim);
+    border-color: var(--accent-dim);
+    color: #04140c;
+    font-weight: 500;
+  }
+  .btn.primary:hover { background: var(--accent); border-color: var(--accent); }
+  .btn:disabled {
+    background: none;
+    border-color: var(--line);
+    color: #57635e;
+    cursor: not-allowed;
+  }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ---------- caption ---------- */
+
+  .caption {
+    width: 100%;
+    max-width: 940px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 22px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-3);
+  }
+  .caption b { color: var(--ink-2); font-weight: 500; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+  }
+</style>
+
+<form class="window" onsubmit="return false">
+  <div class="titlebar">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <div class="name"><b>switchyard-desktop</b> — Setup</div>
+  </div>
+
+  <div class="steps">
+    <div class="step done"><span class="n">✓</span><span class="t">Codex setup</span></div>
+    <span class="bar"></span>
+    <div class="step done"><span class="n">✓</span><span class="t">Models</span></div>
+    <span class="bar"></span>
+    <div class="step now"><span class="n">3</span><span class="t">Routing roles</span></div>
+    <span class="bar"></span>
+    <div class="step"><span class="n">4</span><span class="t">Review</span></div>
+  </div>
+
+  <div class="head">
+    <h1>Choose routing roles</h1>
+    <p>Select how Switchyard should route a request, then assign only models available through your Codex subscription.</p>
+  </div>
+
+  <input class="vh" type="radio" name="alg" id="alg-stage">
+  <input class="vh" type="radio" name="alg" id="alg-class" checked>
+
+  <div class="cols">
+    <div class="left">
+      <div>
+        <h2>Routing algorithm</h2>
+        <div class="options">
+          <label class="opt stage" for="alg-stage">
+            <span class="radio"></span>
+            <span>
+              <span class="nm">Stage router</span>
+              <span class="sm">Starts with an efficient model and escalates to a capable model without an extra classifier call.</span>
+              <span class="cost">no extra call per turn</span>
+            </span>
+          </label>
+
+          <label class="opt classifier" for="alg-class">
+            <span class="radio"></span>
+            <span>
+              <span class="nm">Classifier router</span>
+              <span class="sm">Uses a model call to classify each new user turn among two to six target roles.</span>
+              <span class="cost paid">+1 classifier call per turn</span>
+            </span>
+          </label>
+        </div>
+      </div>
+
+      <div class="discovery">
+        <h2>Subscription models <span class="of">· 5 found</span></h2>
+        <ul class="models">
+          <li>gpt-5.6-terra</li>
+          <li>gpt-5.6-sol</li>
+          <li>gpt-6-astra <span class="tag">codex default</span></li>
+          <li>gpt-5.3-codex-spark</li>
+          <li>gpt-5.6-luna</li>
+        </ul>
+        <button class="refresh" type="button">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M13.5 8a5.5 5.5 0 1 1-1.9-4.2"/><path d="M13.5 2v3h-3"/></svg>
+          Refresh discovery
+        </button>
+        <div class="src">from ~/.codex/config.toml</div>
+      </div>
+    </div>
+
+    <div class="right">
+      <!-- classifier branch -->
+      <div class="branch classifier">
+        <div>
+          <h2>Classifier target roles</h2>
+          <p class="hint" style="margin: 0 0 8px;">The classifier makes one additional model call for each new user turn, then selects one of these ordered targets.</p>
+
+          <div class="roles">
+            <div class="role">
+              <span class="grip"><svg viewBox="0 0 10 14" fill="currentColor"><circle cx="2" cy="2" r="1"/><circle cx="8" cy="2" r="1"/><circle cx="2" cy="7" r="1"/><circle cx="8" cy="7" r="1"/><circle cx="2" cy="12" r="1"/><circle cx="8" cy="12" r="1"/></svg></span>
+              <span class="idx">1</span>
+              <span class="who">
+                <span class="nm"><span class="edit">Architecture</span><span class="flag fallback">fallback</span></span>
+                <span class="sm">Cross-module design, hard debugging, ambiguous work.</span>
+              </span>
+              <select aria-label="Model for Architecture">
+                <option selected>gpt-5.6-terra</option>
+                <option>gpt-5.6-sol</option>
+                <option>gpt-6-astra</option>
+                <option>gpt-5.3-codex-spark</option>
+                <option>gpt-5.6-luna</option>
+              </select>
+            </div>
+
+            <div class="role">
+              <span class="grip"><svg viewBox="0 0 10 14" fill="currentColor"><circle cx="2" cy="2" r="1"/><circle cx="8" cy="2" r="1"/><circle cx="2" cy="7" r="1"/><circle cx="8" cy="7" r="1"/><circle cx="2" cy="12" r="1"/><circle cx="8" cy="12" r="1"/></svg></span>
+              <span class="idx">2</span>
+              <span class="who">
+                <span class="nm"><span class="edit">Refactors</span></span>
+                <span class="sm">Multi-file renames, extracting modules, tightening interfaces.</span>
+              </span>
+              <select aria-label="Model for Refactors">
+                <option>gpt-5.6-terra</option>
+                <option selected>gpt-5.6-sol</option>
+                <option>gpt-6-astra</option>
+                <option>gpt-5.3-codex-spark</option>
+                <option>gpt-5.6-luna</option>
+              </select>
+            </div>
+
+            <div class="role">
+              <span class="grip"><svg viewBox="0 0 10 14" fill="currentColor"><circle cx="2" cy="2" r="1"/><circle cx="8" cy="2" r="1"/><circle cx="2" cy="7" r="1"/><circle cx="8" cy="7" r="1"/><circle cx="2" cy="12" r="1"/><circle cx="8" cy="12" r="1"/></svg></span>
+              <span class="idx">3</span>
+              <span class="who">
+                <span class="nm"><span class="edit">Quick fixes</span><span class="flag">classifier</span></span>
+                <span class="sm">Tiny localized edits, syntax errors, short completions.</span>
+              </span>
+              <select aria-label="Model for Quick fixes">
+                <option>gpt-5.6-terra</option>
+                <option>gpt-5.6-sol</option>
+                <option selected>gpt-6-astra</option>
+                <option>gpt-5.3-codex-spark</option>
+                <option>gpt-5.6-luna</option>
+              </select>
+            </div>
+
+            <div class="role">
+              <span class="grip"><svg viewBox="0 0 10 14" fill="currentColor"><circle cx="2" cy="2" r="1"/><circle cx="8" cy="2" r="1"/><circle cx="2" cy="7" r="1"/><circle cx="8" cy="7" r="1"/><circle cx="2" cy="12" r="1"/><circle cx="8" cy="12" r="1"/></svg></span>
+              <span class="idx">4</span>
+              <span class="who">
+                <span class="nm"><span class="edit">Docs</span></span>
+                <span class="sm">READMEs, comments, changelog entries, docstrings.</span>
+              </span>
+              <select aria-label="Model for Docs">
+                <option>gpt-5.6-terra</option>
+                <option>gpt-5.6-sol</option>
+                <option>gpt-6-astra</option>
+                <option selected>gpt-5.3-codex-spark</option>
+                <option>gpt-5.6-luna</option>
+              </select>
+            </div>
+
+            <div class="role needs">
+              <span class="grip"><svg viewBox="0 0 10 14" fill="currentColor"><circle cx="2" cy="2" r="1"/><circle cx="8" cy="2" r="1"/><circle cx="2" cy="7" r="1"/><circle cx="8" cy="7" r="1"/><circle cx="2" cy="12" r="1"/><circle cx="8" cy="12" r="1"/></svg></span>
+              <span class="idx">5</span>
+              <span class="who">
+                <span class="nm"><span class="edit">Long context</span></span>
+                <span class="sm">Whole-repo questions and large diffs that need a big window.</span>
+              </span>
+              <select class="empty" aria-label="Model for Long context">
+                <option selected>Choose a model…</option>
+                <option>gpt-5.6-terra</option>
+                <option>gpt-5.6-sol</option>
+                <option>gpt-6-astra</option>
+                <option>gpt-5.3-codex-spark</option>
+                <option>gpt-5.6-luna</option>
+              </select>
+              <span class="needline">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 2.5 14.5 13.5H1.5z"/><path d="M8 6.5v3.2M8 11.8v.4"/></svg>
+                Needs a model before routing can start
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div class="addrow">
+          <button class="ghost" type="button">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>
+            Add target
+          </button>
+          <span class="count">5 of 6 targets</span>
+        </div>
+
+        <div class="choices">
+          <h2 style="margin: 0;">Classifier choices <span class="of">· assigned targets only</span></h2>
+          <div class="pair">
+            <div class="field">
+              <label for="c-target">Classifier target</label>
+              <select id="c-target">
+                <option>Architecture</option>
+                <option>Refactors</option>
+                <option selected>Quick fixes</option>
+                <option>Docs</option>
+              </select>
+              <div class="why">Makes the routing decision each turn.</div>
+            </div>
+            <div class="field">
+              <label for="f-target">Fallback target</label>
+              <select id="f-target">
+                <option selected>Architecture</option>
+                <option>Refactors</option>
+                <option>Quick fixes</option>
+                <option>Docs</option>
+              </select>
+              <div class="why">Serves the turn when classification is unclear.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- stage router branch -->
+      <div class="branch stage">
+        <div>
+          <h2>Stage router roles</h2>
+          <p class="hint" style="margin: 0 0 8px;">Every turn begins at Efficient and escalates to Capable only when Switchyard sees low confidence. These roles are fixed.</p>
+
+          <div class="roles">
+            <div class="role fixed">
+              <span class="grip"></span>
+              <span class="idx">1</span>
+              <span class="who">
+                <span class="nm">Efficient</span>
+                <span class="sm">Tiny, localized edits, quick syntax fixes, short completions and narrowly scoped diagnostics.</span>
+              </span>
+              <select aria-label="Model for Efficient">
+                <option>gpt-5.6-terra</option>
+                <option>gpt-5.6-sol</option>
+                <option selected>gpt-6-astra</option>
+                <option>gpt-5.3-codex-spark</option>
+                <option>gpt-5.6-luna</option>
+              </select>
+            </div>
+
+            <div class="role fixed">
+              <span class="grip"></span>
+              <span class="idx">2</span>
+              <span class="who">
+                <span class="nm">Capable</span>
+                <span class="sm">Architecture, hard debugging, cross-module changes and ambiguous, high-value work needing strong judgment.</span>
+              </span>
+              <select aria-label="Model for Capable">
+                <option selected>gpt-5.6-terra</option>
+                <option>gpt-5.6-sol</option>
+                <option>gpt-6-astra</option>
+                <option>gpt-5.3-codex-spark</option>
+                <option>gpt-5.6-luna</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <p class="hint">Stage routing has no classifier target and no fallback target — the escalation rule replaces both. Switching back to the classifier restores its own role list.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <div class="foot-state classifier">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 2.5 14.5 13.5H1.5z"/><path d="M8 6.5v3.2M8 11.8v.4"/></svg>
+      <span id="blocker">Assign a model to Long context.</span>
+    </div>
+    <div class="foot-state stage">
+      <svg viewBox="0 0 16 16" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linecap="round"><path d="M3 8.5l3.5 3.5L13 5"/></svg>
+      <span><b>Both roles assigned.</b> Review runs Switchyard's dry-run before anything starts.</span>
+    </div>
+    <div class="btns">
+      <button class="btn" type="button">Back</button>
+      <button class="btn primary" type="button">Next</button>
+    </div>
+  </div>
+</form>
+
+<div class="caption">
+  <span><b>940 × 780</b> — algorithm on the left, its roles on the right</span>
+  <span><b>Click either algorithm</b> — the role set, classifier box and footer state swap live</span>
+  <span><b>Sample data</b> — discovered model IDs and target names are examples</span>
+</div>
+
+<script>
+  // The Next button reflects the branch: the classifier branch has an unassigned
+  // role, so it stays disabled until that role gets a model.
+  (function () {
+    var stage = document.getElementById("alg-stage");
+    var next = document.querySelector(".btn.primary");
+    var empty = document.querySelector("select.empty");
+    var state = document.querySelector(".foot-state.classifier");
+    var blocker = document.getElementById("blocker");
+
+    function sync() {
+      var blocked = !stage.checked && empty.selectedIndex === 0;
+      next.disabled = blocked;
+    }
+
+    document.querySelectorAll('input[name="alg"]').forEach(function (radio) {
+      radio.addEventListener("change", sync);
+    });
+    empty.addEventListener("change", function () {
+      if (empty.selectedIndex !== 0) {
+        var row = empty.closest(".role");
+        empty.classList.remove("empty");
+        row.classList.remove("needs");
+        var need = row.querySelector(".needline");
+        if (need) need.remove();
+        state.querySelector("svg").remove();
+        blocker.textContent = "All 5 targets assigned.";
+        state.style.color = "var(--ink-2)";
+        var name = row.querySelector(".nm .edit").textContent;
+        ["c-target", "f-target"].forEach(function (id) {
+          var picker = document.getElementById(id);
+          if (!picker.querySelector('option[value="' + name + '"]')) {
+            var option = document.createElement("option");
+            option.value = name;
+            option.textContent = name;
+            picker.append(option);
+          }
+        });
+      }
+      sync();
+    });
+    sync();
+  })();
+</script>

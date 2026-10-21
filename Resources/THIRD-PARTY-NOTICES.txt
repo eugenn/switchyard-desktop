@@ -1,0 +1,70 @@
+SWITCHYARD_DESKTOP THIRD-PARTY NOTICES
+
+Last updated: September 11, 2026
+
+Bundled source dependency
+-------------------------
+
+TOMLKit 0.6.0
+Copyright (c) 2024 Jeff Lebrun
+https://github.com/LebJe/TOMLKit
+
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Bundled project assets
+----------------------
+
+The switchyard-desktop application icon, Info.plist, privacy notice, and copyright
+notice are switchyard-desktop project assets. No additional third-party attribution
+is required for those files.
+
+System components
+-----------------
+
+The application uses Apple system frameworks including Foundation, AppKit,
+SwiftUI, and Observation. These are supplied by macOS and the Apple developer
+toolchain rather than redistributed as third-party source packages.
+
+External integrations not bundled with switchyard-desktop
+---------------------------------------------------
+
+- OpenAI Codex is configured by the user and is not included in the Model
+  Router app or DMG.
+
+switchyard-desktop is an independent utility. It is not affiliated with, endorsed
+by, or sponsored by OpenAI or NVIDIA. OpenAI, Codex, NVIDIA, and Switchyard
+names and marks belong to their respective owners.
+
+Bundled servers and runtime
+---------------------------
+Switchyard 0.3.0, NVIDIA Corporation & Affiliates, Apache-2.0.
+Imported sources may include changes relative to the base commit; the exact
+source inventory is recorded in switchyard-source.json. Full LICENSE and
+NOTICE are in Licenses/Switchyard, with Rust dependency texts and an index
+in Licenses/Rust.
+
+Python 3.12.10, Python Software Foundation and contributors. The managed
+Python distribution includes its license texts in the LiteLLM helper tree.
+LiteLLM 1.97.0 and FastAPI 0.136.3 are bundled with their pinned dependencies.
+Their distribution metadata (*.dist-info) and license texts are retained
+inside Contents/Resources/LiteLLM/lib/python3.12/site-packages.
+Dependency versions and package hashes are fixed in requirements.lock at
+build time. No Python packages are installed when the application starts.

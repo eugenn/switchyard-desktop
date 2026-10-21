@@ -1,0 +1,299 @@
+<title>Available Models</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #080a0a;
+    --win: #0e1211;
+    --panel: #121615;
+    --panel-2: #181d1b;
+    --line: rgba(224, 240, 232, 0.075);
+    --line-2: rgba(224, 240, 232, 0.15);
+    --ink: #e9f1ec;
+    --ink-2: #9dada6;
+    --ink-3: #6d7d76;
+    --accent: #4fc98a;
+    --accent-dim: #2fa96f;
+    --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 13px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+    padding: 28px 20px 40px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .window {
+    width: 100%;
+    max-width: 720px;
+    background: var(--win);
+    border: 1px solid var(--line-2);
+    border-radius: 11px;
+    box-shadow: 0 24px 60px -18px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+  }
+
+  .titlebar {
+    height: 34px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #151a18, #101413);
+  }
+  .lights { display: flex; gap: 6px; }
+  .lights i { width: 10px; height: 10px; border-radius: 50%; }
+  .lights i:nth-child(1) { background: #e05c51; }
+  .lights i:nth-child(2) { background: #e0a63f; }
+  .lights i:nth-child(3) { background: #4fb555; }
+  .titlebar .name { font-size: 12px; font-weight: 500; color: var(--ink-2); }
+  .titlebar .name b { color: var(--ink); font-weight: 600; }
+
+  .steps {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--line);
+  }
+  .step { display: flex; align-items: center; gap: 7px; }
+  .step .n {
+    width: 18px;
+    height: 18px;
+    flex: none;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-family: var(--mono);
+    font-size: 10px;
+    background: rgba(224, 240, 232, 0.08);
+    color: var(--ink-3);
+  }
+  .step .t { font-size: 12px; color: var(--ink-3); }
+  .step.done .n { background: rgba(79, 201, 138, 0.18); color: var(--accent); }
+  .step.done .t { color: var(--ink-2); }
+  .step.now .n { background: var(--accent-dim); color: #04140c; font-weight: 500; }
+  .step.now .t { color: var(--ink); font-weight: 500; }
+  .steps .bar { flex: 1; height: 1px; background: var(--line); min-width: 12px; }
+
+  .content { padding: 16px 18px 18px; display: flex; flex-direction: column; gap: 14px; }
+  h1 { margin: 0; font-size: 19px; font-weight: 600; letter-spacing: -0.01em; }
+  .sub { margin: 4px 0 0; max-width: 64ch; font-size: 12.5px; color: var(--ink-2); }
+
+  h2 {
+    margin: 0 0 8px;
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+  h2 .of { text-transform: none; letter-spacing: 0; }
+
+  /* ---------- model list ---------- */
+
+  .list {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    overflow: hidden;
+  }
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 9px 13px;
+  }
+  .row + .row { border-top: 1px solid var(--line); }
+  .row:hover { background: var(--panel-2); }
+  .row .nm { font-size: 12.5px; font-weight: 500; }
+  .row .id {
+    margin-top: 1px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--ink-3);
+  }
+  .row .tag {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+    border: 1px solid var(--line-2);
+    border-radius: 3px;
+    padding: 1px 5px;
+    white-space: nowrap;
+  }
+
+  /* ---------- discovery meta ---------- */
+
+  .meta { display: flex; align-items: center; gap: 12px; }
+  .meta .when {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--ink-3);
+  }
+  .btn {
+    font-family: var(--sans);
+    font-size: 12.5px;
+    padding: 5px 14px;
+    border-radius: 6px;
+    border: 1px solid var(--line-2);
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--ink);
+    cursor: pointer;
+  }
+  .btn:hover { background: rgba(255, 255, 255, 0.07); }
+  .btn.primary {
+    background: var(--accent-dim);
+    border-color: var(--accent-dim);
+    color: #04140c;
+    font-weight: 500;
+  }
+  .btn.primary:hover { background: var(--accent); border-color: var(--accent); }
+  .btn:disabled {
+    background: none;
+    border-color: var(--line);
+    color: #57635e;
+    cursor: not-allowed;
+  }
+  .btn.small { font-family: var(--mono); font-size: 10.5px; padding: 3px 9px; }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .meta .btn { margin-left: auto; }
+
+  .note {
+    display: flex;
+    gap: 8px;
+    font-size: 11.5px;
+    color: var(--ink-3);
+    max-width: 70ch;
+  }
+  .note svg { width: 13px; height: 13px; flex: none; margin-top: 2px; }
+
+  .footer {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 11px 18px;
+    border-top: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.012);
+  }
+  .fstate { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--ink-2); }
+  .fstate svg { width: 13px; height: 13px; flex: none; }
+  .btns { margin-left: auto; display: flex; gap: 8px; }
+
+  .caption {
+    width: 100%;
+    max-width: 720px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-3);
+  }
+  .caption b { color: var(--ink-2); font-weight: 500; }
+</style>
+
+<div class="window">
+  <div class="titlebar">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <div class="name"><b>switchyard-desktop</b> — Setup</div>
+  </div>
+
+  <div class="steps">
+    <div class="step done"><span class="n">✓</span><span class="t">Codex setup</span></div>
+    <span class="bar"></span>
+    <div class="step now"><span class="n">2</span><span class="t">Models</span></div>
+    <span class="bar"></span>
+    <div class="step"><span class="n">3</span><span class="t">Routing roles</span></div>
+    <span class="bar"></span>
+    <div class="step"><span class="n">4</span><span class="t">Review</span></div>
+  </div>
+
+  <div class="content">
+    <div>
+      <h1>Available models</h1>
+      <p class="sub">These are the only models switchyard-desktop can assign to routing roles.</p>
+    </div>
+
+    <div>
+      <h2>Reported by your subscription <span class="of">· 5 models</span></h2>
+      <div class="list">
+        <div class="row">
+          <div>
+            <div class="nm">GPT-5.6 Terra</div>
+            <div class="id">gpt-5.6-terra</div>
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <div class="nm">GPT-5.6 Sol</div>
+            <div class="id">gpt-5.6-sol</div>
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <div class="nm">GPT-6 Astra</div>
+            <div class="id">gpt-6-astra</div>
+          </div>
+          <span class="tag">default</span>
+        </div>
+        <div class="row">
+          <div>
+            <div class="nm">GPT-5.3 Codex Spark</div>
+            <div class="id">gpt-5.3-codex-spark</div>
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <div class="nm">GPT-5.6 Luna</div>
+            <div class="id">gpt-5.6-luna</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="meta">
+      <span class="when">discovered 20:01:12 · via codex app-server</span>
+      <button class="btn small" type="button">Refresh models</button>
+    </div>
+
+    <p class="note">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="8" r="6.2"/><path d="M8 7.2v4M8 4.9v.3"/></svg>
+      Refresh before starting if your Codex subscription access changes. switchyard-desktop never adds a model that Codex did not report.
+    </p>
+  </div>
+
+  <div class="footer">
+    <div class="fstate">
+      <svg viewBox="0 0 16 16" fill="none" stroke="var(--accent)" stroke-width="1.7" stroke-linecap="round"><path d="M2.8 8.4l3.4 3.4L13.2 4.8"/></svg>
+      5 models found — a route needs at least 2.
+    </div>
+    <div class="btns">
+      <button class="btn" type="button">Back</button>
+      <button class="btn primary" type="button">Next</button>
+    </div>
+  </div>
+</div>
+
+<div class="caption">
+  <span><b>720 × 500</b> — step 2 of the setup wizard</span>
+  <span><b>Deliberately thin</b> — CodexSubscriptionModel carries only id, display name and the default flag, so no other column would be real</span>
+  <span><b>Sample data</b> — model IDs and the discovery time are examples</span>
+</div>

@@ -1,0 +1,54 @@
+SWITCHYARD_DESKTOP PRIVACY AND DATA FLOW
+
+switchyard-desktop is an independent local application, not an OpenAI or NVIDIA product.
+
+Default flow
+------------
+Codex sends requests to the bundled Switchyard server on 127.0.0.1:4100.
+Switchyard selects a model and sends the request to bundled LiteLLM on
+127.0.0.1:4101. LiteLLM sends it to ChatGPT using its own OAuth session.
+Requests may contain prompts, source code, files and tool results.
+The selected upstream service processes this content under its own terms.
+
+For the bundled LiteLLM upstream, Switchyard does not forward Codex's
+credential. An explicit direct-upstream configuration can instead forward
+Codex authorization to the selected endpoint. Review the endpoint before Start.
+
+Authentication
+--------------
+Codex model discovery uses the existing Codex setup. LiteLLM separately stores
+and refreshes ChatGPT OAuth tokens at ~/.config/litellm/chatgpt/auth.json.
+This location is shared with a manual LiteLLM installation. Tokens are not
+copied into the app, DMG or generated configurations. When needed, the app
+shows a temporary browser sign-in URL and device code; it never prints tokens.
+The shared OAuth session is not removed on Revert or uninstall.
+
+Local files
+-----------
+Under ~/Library/Application Support/switchyard-desktop the app writes routes.toml,
+litellm.yaml, active-routing.json, saved-routing-setup.json, routing-log.jsonl
+and model-prices.json.
+The saved setup contains routing choices and model metadata but no credentials.
+The routing log holds model choices, status and timing, not request bodies. The
+Statistics window reads it and the local Switchyard statistics API.
+While the Statistics window is open, the app downloads LiteLLM's public model
+price map from raw.githubusercontent.com at most once a day to estimate session
+cost, and caches it as model-prices.json. The request carries no user data;
+without it the price map bundled with LiteLLM is used.
+The app backs up Codex's config.toml before changing its provider and model.
+It resolves this file from CODEX_HOME or the default ~/.codex directory.
+
+Logging and lifetime
+--------------------
+LiteLLM proxy stdout/stderr is discarded and telemetry is disabled by the
+launcher. Its OAuth login instructions are displayed temporarily. Switchyard
+diagnostics pass through a redactor before display. switchyard-desktop does not
+intentionally log prompts, source code, request bodies or credentials.
+
+Both managed servers run while routing is active. Revert restores the captured
+Codex configuration before stopping them. Closing the main window does not
+stop active routing. Normal quit offers Revert and Quit or Cancel. After an
+unclean exit, reopen the application and complete recovery.
+
+Remove the application only after Revert. Removing it does not automatically
+restore Codex, erase backups or delete the shared LiteLLM OAuth session.

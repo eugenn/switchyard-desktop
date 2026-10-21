@@ -1,0 +1,43 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Run Rust-owned libsy algorithms with Python-hosted model clients."""
+
+from switchyard_rust.libsy import (
+    Algorithm,
+    ContextWindowExceededError,
+    CustomClassifierConfig,
+    DecisionCall,
+    DeescalationConfig,
+    EscalationClassifierConfig,
+    LibsyError,
+    LlmClassifierConfig,
+    LlmFallback,
+    LlmResponse,
+    ModelCall,
+    OutcomeMetadata,
+    RoutingOutcome,
+    Step,
+    TaskClassifierConfig,
+)
+
+from . import algorithms as algorithms
+
+__all__ = [
+    "Algorithm",
+    "ContextWindowExceededError",
+    "CustomClassifierConfig",
+    "DecisionCall",
+    "DeescalationConfig",
+    "EscalationClassifierConfig",
+    "LibsyError",
+    "LlmClassifierConfig",
+    "LlmFallback",
+    "LlmResponse",
+    "ModelCall",
+    "OutcomeMetadata",
+    "RoutingOutcome",
+    "Step",
+    "TaskClassifierConfig",
+    "algorithms",
+]

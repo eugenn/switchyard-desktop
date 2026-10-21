@@ -1,0 +1,12 @@
+.build/
+.swiftpm/
+*.xcodeproj
+.DS_Store
+build/
+dist/
+.idea/
+.cadence/
+.code-review-graph/
+.claude/
+__pycache__/
+*.pyc

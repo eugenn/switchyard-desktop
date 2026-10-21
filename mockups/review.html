@@ -1,0 +1,725 @@
+<title>Review And Start Routing</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #080a0a;
+    --win: #0e1211;
+    --panel: #121615;
+    --panel-2: #181d1b;
+    --sunk: #0a0d0c;
+    --line: rgba(224, 240, 232, 0.075);
+    --line-2: rgba(224, 240, 232, 0.15);
+    --ink: #e9f1ec;
+    --ink-2: #9dada6;
+    --ink-3: #6d7d76;
+    --accent: #4fc98a;
+    --accent-dim: #2fa96f;
+    --warn: #fab219;
+    --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 13px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+    padding: 28px 20px 40px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .window {
+    width: 100%;
+    max-width: 1160px;
+    background: var(--win);
+    border: 1px solid var(--line-2);
+    border-radius: 11px;
+    box-shadow: 0 24px 60px -18px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+  }
+
+  .titlebar {
+    height: 34px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #151a18, #101413);
+  }
+  .lights { display: flex; gap: 6px; }
+  .lights i { width: 10px; height: 10px; border-radius: 50%; }
+  .lights i:nth-child(1) { background: #e05c51; }
+  .lights i:nth-child(2) { background: #e0a63f; }
+  .lights i:nth-child(3) { background: #4fb555; }
+  .titlebar .name { font-size: 12px; font-weight: 500; color: var(--ink-2); }
+  .titlebar .name b { color: var(--ink); font-weight: 600; }
+
+  .steps {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--line);
+  }
+  .step { display: flex; align-items: center; gap: 7px; }
+  .step .n {
+    width: 18px;
+    height: 18px;
+    flex: none;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-family: var(--mono);
+    font-size: 10px;
+    background: rgba(224, 240, 232, 0.08);
+    color: var(--ink-3);
+  }
+  .step .t { font-size: 12px; color: var(--ink-3); }
+  .step.done .n { background: rgba(79, 201, 138, 0.18); color: var(--accent); }
+  .step.done .t { color: var(--ink-2); }
+  .step.now .n { background: var(--accent-dim); color: #04140c; font-weight: 500; }
+  .step.now .t { color: var(--ink); font-weight: 500; }
+  .steps .bar { flex: 1; height: 1px; background: var(--line); min-width: 12px; }
+
+  .head { padding: 16px 18px 12px; }
+  .head h1 { margin: 0; font-size: 19px; font-weight: 600; letter-spacing: -0.01em; }
+  .head p { margin: 4px 0 0; max-width: 78ch; font-size: 12.5px; color: var(--ink-2); }
+
+  .cols {
+    display: grid;
+    grid-template-columns: 1fr 560px;
+    align-items: start;
+  }
+  .left {
+    padding: 4px 18px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 13px;
+    min-width: 0;
+  }
+  .right {
+    padding: 4px 18px 18px;
+    border-left: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  h2 {
+    margin: 0 0 7px;
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+  h2 .of { text-transform: none; letter-spacing: 0; }
+
+  .panel {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    overflow: hidden;
+  }
+
+  /* ---------- profile summary ---------- */
+
+  .kv {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    padding: 5px 13px;
+    font-size: 12px;
+  }
+  .kv + .kv { border-top: 1px solid rgba(224, 240, 232, 0.045); }
+  .kv .k { color: var(--ink-2); }
+  .kv .v {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
+  .kv.role .k { padding-left: 11px; position: relative; }
+  .kv.role .k::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 7px;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: #3a443f;
+  }
+  .kv .flag {
+    font-family: var(--mono);
+    font-size: 8.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 1px 4px;
+    border-radius: 3px;
+    border: 1px solid rgba(79, 201, 138, 0.35);
+    color: var(--accent);
+  }
+  .kv .flag.fb { border-color: var(--line-2); color: var(--ink-2); }
+  .behaviour {
+    padding: 8px 13px;
+    border-top: 1px solid var(--line);
+    font-size: 11.5px;
+    color: var(--ink-3);
+  }
+
+  /* ---------- prerequisites ---------- */
+
+  .pre {
+    display: grid;
+    grid-template-columns: 15px 1fr;
+    gap: 9px;
+    padding: 7px 13px;
+    align-items: start;
+  }
+  .pre + .pre { border-top: 1px solid rgba(224, 240, 232, 0.045); }
+  .pre svg { width: 13px; height: 13px; margin-top: 2px; }
+  .pre .l { font-size: 12px; font-weight: 500; }
+  .pre .m {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--ink-3);
+    word-break: break-word;
+  }
+
+  /* ---------- prerequisites, collapsed ---------- */
+
+  .prereq {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+  }
+  .prereq summary { gap: 8px; }
+  .prereq summary svg { width: 13px; height: 13px; }
+  .prereq .hintx {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 400;
+    color: var(--ink-3);
+  }
+  .prereq .hintx::after { content: "show details"; }
+  .prereq[open] .hintx::after { content: "hide"; }
+  .prelist { border-top: 1px solid var(--line); padding-bottom: 2px; }
+
+  /* ---------- what changes ---------- */
+
+  .changes { padding: 11px 13px 12px; }
+  .changes > p {
+    margin: 0 0 9px;
+    font-size: 12px;
+    color: var(--ink-2);
+  }
+  .paths { display: flex; flex-direction: column; gap: 7px; }
+  .path .pk {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+  .path .pv {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--ink-2);
+    word-break: break-all;
+  }
+  .flow {
+    margin: 10px 0 0;
+    font-size: 11px;
+    color: var(--ink-3);
+  }
+  .ack {
+    margin-top: 11px;
+    padding-top: 11px;
+    border-top: 1px solid var(--line);
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .ack input {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 14px;
+    height: 14px;
+    margin: 2px 0 0;
+    flex: none;
+    border: 1.5px solid var(--ink-3);
+    border-radius: 3px;
+    background: var(--sunk);
+    cursor: pointer;
+  }
+  .ack input:checked {
+    background: var(--accent-dim);
+    border-color: var(--accent-dim);
+    background-image: linear-gradient(45deg, transparent 45%, #04140c 45%, #04140c 55%, transparent 55%),
+      linear-gradient(-45deg, transparent 45%, #04140c 45%, #04140c 55%, transparent 55%);
+    background-size: 8px 2px, 8px 2px;
+    background-position: 2px 8px, 4px 8px;
+    background-repeat: no-repeat;
+  }
+  .ack input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+
+  /* ---------- what changes (full-width band above the action) ---------- */
+
+  .band {
+    padding: 12px 18px 13px;
+    border-top: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.012);
+  }
+  .band .paths {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px 18px;
+  }
+  .bandfoot {
+    margin-top: 11px;
+    padding-top: 11px;
+    border-top: 1px solid var(--line);
+    display: flex;
+    align-items: flex-start;
+    gap: 22px;
+  }
+  .bandfoot .flow { margin: 0; flex: 1; max-width: 88ch; }
+  .bandfoot .ack { margin: 0; padding: 0; border: 0; flex: none; }
+
+  /* ---------- generated toml ---------- */
+
+  .code {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--sunk);
+    max-height: 440px;
+    overflow: auto;
+  }
+  .code pre {
+    margin: 0;
+    padding: 11px 13px;
+    font-family: var(--mono);
+    font-size: 10px;
+    line-height: 1.6;
+    color: var(--ink-2);
+    tab-size: 2;
+  }
+  .code .c { color: #5d6b64; }
+  .code .t { color: var(--accent); }
+  .code .s { color: #b9d6c7; }
+
+  details {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+  }
+  summary {
+    padding: 8px 13px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+  summary::-webkit-details-marker { display: none; }
+  summary::before {
+    content: "";
+    width: 0;
+    height: 0;
+    border-left: 4px solid var(--ink-3);
+    border-top: 3.5px solid transparent;
+    border-bottom: 3.5px solid transparent;
+  }
+  details[open] summary::before { transform: rotate(90deg); }
+  summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .adv {
+    padding: 0 13px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+  }
+  .field { display: flex; align-items: center; gap: 10px; }
+  .field label {
+    font-size: 11.5px;
+    color: var(--ink-2);
+    width: 128px;
+    flex: none;
+  }
+  .field input {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--ink);
+    background: var(--sunk);
+    border: 1px solid var(--line-2);
+    border-radius: 5px;
+    padding: 4px 8px;
+  }
+  .field input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .adv .warnnote {
+    display: flex;
+    gap: 7px;
+    font-size: 10.5px;
+    color: var(--ink-3);
+  }
+  .adv .warnnote svg { width: 12px; height: 12px; flex: none; margin-top: 1px; }
+
+  /* ---------- footer ---------- */
+
+  .footer {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 11px 18px;
+    border-top: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.012);
+  }
+  .proxy { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--ink-3); }
+  .proxy .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #3c4442;
+  }
+  .blocker {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12px;
+    color: var(--warn);
+  }
+  .blocker svg { width: 13px; height: 13px; flex: none; }
+  .btns { margin-left: auto; display: flex; gap: 8px; }
+  .btn {
+    font-family: var(--sans);
+    font-size: 12.5px;
+    padding: 5px 14px;
+    border-radius: 6px;
+    border: 1px solid var(--line-2);
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--ink);
+    cursor: pointer;
+  }
+  .btn:hover { background: rgba(255, 255, 255, 0.07); }
+  .btn.primary {
+    background: var(--accent-dim);
+    border-color: var(--accent-dim);
+    color: #04140c;
+    font-weight: 500;
+  }
+  .btn.primary:hover { background: var(--accent); border-color: var(--accent); }
+  .btn:disabled {
+    background: none;
+    border-color: var(--line);
+    color: #57635e;
+    cursor: not-allowed;
+  }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .caption {
+    width: 100%;
+    max-width: 1160px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-3);
+  }
+  .caption b { color: var(--ink-2); font-weight: 500; }
+</style>
+
+<div class="window">
+  <div class="titlebar">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <div class="name"><b>switchyard-desktop</b> — Setup</div>
+  </div>
+
+  <div class="steps">
+    <div class="step done"><span class="n">✓</span><span class="t">Codex setup</span></div>
+    <span class="bar"></span>
+    <div class="step done"><span class="n">✓</span><span class="t">Models</span></div>
+    <span class="bar"></span>
+    <div class="step done"><span class="n">✓</span><span class="t">Routing roles</span></div>
+    <span class="bar"></span>
+    <div class="step now"><span class="n">4</span><span class="t">Review</span></div>
+  </div>
+
+  <div class="head">
+    <h1>Review and start routing</h1>
+    <p>switchyard-desktop validates this configuration, starts the proxy, and points Codex at it. Your Codex config is backed up first.</p>
+  </div>
+
+  <div class="cols">
+    <div class="left">
+      <div>
+        <h2>Profile</h2>
+        <div class="panel">
+          <div class="kv"><span class="k">Provider</span><span class="v">OpenAI Codex</span></div>
+          <div class="kv"><span class="k">Algorithm</span><span class="v">Classifier router</span></div>
+          <div class="kv role"><span class="k">Architecture</span><span class="flag fb">fallback</span><span class="v">gpt-5.6-terra</span></div>
+          <div class="kv role"><span class="k">Refactors</span><span class="v">gpt-5.6-sol</span></div>
+          <div class="kv role"><span class="k">Quick fixes</span><span class="flag">classifier</span><span class="v">gpt-6-astra</span></div>
+          <div class="kv role"><span class="k">Docs</span><span class="v">gpt-5.3-codex-spark</span></div>
+          <div class="kv role"><span class="k">Long context</span><span class="v">gpt-5.6-luna</span></div>
+          <div class="kv"><span class="k">Proxy</span><span class="v">127.0.0.1:4100</span></div>
+          <div class="kv"><span class="k">Codex model</span><span class="v">switchyard-desktop</span></div>
+          <div class="behaviour">5 target roles route through a classifier call once per new user turn.</div>
+        </div>
+      </div>
+
+      <div>
+        <h2>Prerequisites</h2>
+        <details class="prereq">
+          <summary>
+            <svg viewBox="0 0 16 16" fill="none" stroke="var(--accent)" stroke-width="1.7" stroke-linecap="round"><path d="M2.8 8.4l3.4 3.4L13.2 4.8"/></svg>
+            6 of 6 passed
+            <span class="hintx"></span>
+          </summary>
+          <div class="prelist">
+            <div class="pre">
+            <svg viewBox="0 0 16 16" fill="none" stroke="var(--accent)" stroke-width="1.7" stroke-linecap="round"><path d="M2.8 8.4l3.4 3.4L13.2 4.8"/></svg>
+            <div>
+              <div class="l">switchyard-server</div>
+              <div class="m">Using /opt/homebrew/bin/switchyard-server.</div>
+            </div>
+          </div>
+          <div class="pre">
+            <svg viewBox="0 0 16 16" fill="none" stroke="var(--accent)" stroke-width="1.7" stroke-linecap="round"><path d="M2.8 8.4l3.4 3.4L13.2 4.8"/></svg>
+            <div>
+              <div class="l">Generated routes</div>
+              <div class="m">Generated configuration is valid.</div>
+            </div>
+          </div>
+          <div class="pre">
+            <svg viewBox="0 0 16 16" fill="none" stroke="var(--accent)" stroke-width="1.7" stroke-linecap="round"><path d="M2.8 8.4l3.4 3.4L13.2 4.8"/></svg>
+            <div>
+              <div class="l">Dry-run</div>
+              <div class="m">switchyard-server accepted the generated configuration.</div>
+            </div>
+          </div>
+          <div class="pre">
+            <svg viewBox="0 0 16 16" fill="none" stroke="var(--accent)" stroke-width="1.7" stroke-linecap="round"><path d="M2.8 8.4l3.4 3.4L13.2 4.8"/></svg>
+            <div>
+              <div class="l">Codex config</div>
+              <div class="m">Codex configuration will be written at ~/.codex/config.toml.</div>
+            </div>
+          </div>
+          <div class="pre">
+            <svg viewBox="0 0 16 16" fill="none" stroke="var(--accent)" stroke-width="1.7" stroke-linecap="round"><path d="M2.8 8.4l3.4 3.4L13.2 4.8"/></svg>
+            <div>
+              <div class="l">Loopback endpoint</div>
+              <div class="m">Local endpoint 127.0.0.1:4100 is loopback-only and available.</div>
+            </div>
+          </div>
+          <div class="pre">
+            <svg viewBox="0 0 16 16" fill="none" stroke="var(--accent)" stroke-width="1.7" stroke-linecap="round"><path d="M2.8 8.4l3.4 3.4L13.2 4.8"/></svg>
+            <div>
+              <div class="l">Upstream URL</div>
+              <div class="m">Requests will be forwarded to https://api.openai.com/v1.</div>
+            </div>
+          </div>
+        </div>
+        </details>
+      </div>
+    </div>
+
+    <div class="right">
+      <div>
+        <h2>Generated routes.toml <span class="of">· read-only</span></h2>
+        <div class="code">
+<pre><span class="c"># Generated by switchyard-desktop. Edits are overwritten on the next Apply.</span>
+schema_version = 1
+
+<span class="c"># The caller's own OpenAI Codex credential is forwarded upstream,
+# so this file never contains a key.</span>
+<span class="t">[llm_clients.openai]</span>
+format = <span class="s">"responses"</span>
+base_url = <span class="s">"https://api.openai.com/v1"</span>
+forward_auth = true
+
+<span class="t">[targets.architecture]</span>
+id = <span class="s">"gpt-5.6-terra"</span>
+llm_client = <span class="s">"openai"</span>
+
+<span class="t">[targets.refactors]</span>
+id = <span class="s">"gpt-5.6-sol"</span>
+llm_client = <span class="s">"openai"</span>
+
+<span class="t">[targets.quick_fixes]</span>
+id = <span class="s">"gpt-6-astra"</span>
+llm_client = <span class="s">"openai"</span>
+
+<span class="t">[targets.docs]</span>
+id = <span class="s">"gpt-5.3-codex-spark"</span>
+llm_client = <span class="s">"openai"</span>
+
+<span class="t">[targets.long_context]</span>
+id = <span class="s">"gpt-5.6-luna"</span>
+llm_client = <span class="s">"openai"</span>
+
+<span class="c"># A judge classifies each new user turn and picks one tier. Tool
+# continuations reuse that decision when the client sends a session id.</span>
+<span class="t">[routes.main]</span>
+id = <span class="s">"switchyard-desktop"</span>
+type = <span class="s">"llm_classifier"</span>
+mode = <span class="s">"custom"</span>
+classifier_target = <span class="s">"quick_fixes"</span>
+targets = [<span class="s">"architecture"</span>, <span class="s">"refactors"</span>, <span class="s">"quick_fixes"</span>, <span class="s">"docs"</span>, <span class="s">"long_context"</span>]
+default_target = <span class="s">"architecture"</span>
+classify_trigger = <span class="s">"user_turn"</span>
+recent_turn_window = 6
+max_output_tokens = 512
+tool_calling = true
+reasoning = true
+prompt = <span class="s">'''
+Choose exactly one model role for the requested coding or knowledge-work turn.
+
+- architecture: Cross-module design, hard debugging, ambiguous work.
+- refactors: Multi-file renames, extracting modules, tightening interfaces.
+- quick_fixes: Tiny localized edits, syntax errors, short completions.
+- docs: READMEs, comments, changelog entries, docstrings.
+- long_context: Whole-repo questions and large diffs that need a big window.
+
+Prefer the least powerful role that can reliably finish the whole requested
+turn. When evidence is insufficient or several difficult capabilities are
+mixed, select architecture.
+
+Return exactly one minified JSON object in this shape:
+{"decision":{"target":"architecture"}}
+'''</span>
+response_schema = <span class="s">'''
+{
+  "type": "object",
+  "properties": {
+    "decision": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": "string",
+          "enum": ["architecture", "refactors", "quick_fixes", "docs", "long_context"]
+        }
+      },
+      "required": ["target"],
+      "additionalProperties": false
+    }
+  },
+  "required": ["decision"],
+  "additionalProperties": false
+}
+'''</span>
+
+<span class="t">[routes.main.policy]</span>
+type = <span class="s">"target_selector"</span>
+selector = <span class="s">"/decision/target"</span>
+</pre>
+        </div>
+      </div>
+
+      <details>
+        <summary>Advanced</summary>
+        <div class="adv">
+          <div class="field">
+            <label for="port">Proxy port</label>
+            <input id="port" value="4100" style="max-width: 88px;">
+          </div>
+          <div class="field">
+            <label for="upstream">Upstream base URL</label>
+            <input id="upstream" value="https://api.openai.com/v1">
+          </div>
+          <div class="field">
+            <label for="binary">switchyard-server</label>
+            <input id="binary" value="/opt/homebrew/bin/switchyard-server">
+          </div>
+          <p class="warnnote">
+            <svg viewBox="0 0 16 16" fill="none" stroke="var(--warn)" stroke-width="1.5" stroke-linecap="round"><path d="M8 2.5 14.5 13.5H1.5z"/><path d="M8 6.5v3.2M8 11.8v.4"/></svg>
+            Port 4000 is reserved for another Switchyard instance on this machine.
+          </p>
+        </div>
+      </details>
+    </div>
+  </div>
+
+  <div class="band">
+    <h2>What Start routing changes</h2>
+    <div class="paths">
+      <div class="path">
+        <div class="pk">Routing file — replaced</div>
+        <div class="pv">~/Library/Application Support/switchyard-desktop/routes.toml</div>
+      </div>
+      <div class="path">
+        <div class="pk">Codex file — backed up, then patched</div>
+        <div class="pv">~/.codex/config.toml → config.toml.2026-09-10T20-04-11.backup</div>
+      </div>
+      <div class="path">
+        <div class="pk">Local process — started</div>
+        <div class="pv">switchyard-server on 127.0.0.1:4100</div>
+      </div>
+      <div class="path">
+        <div class="pk">Upstream — unchanged</div>
+        <div class="pv">https://api.openai.com/v1</div>
+      </div>
+    </div>
+    <div class="bandfoot">
+      <p class="flow">Codex requests, prompts, source code, and existing authorization are forwarded by the local proxy to this upstream endpoint. switchyard-desktop does not store them. Revert restores the captured Codex configuration and stops the local proxy.</p>
+      <label class="ack" for="ack">
+        <input type="checkbox" id="ack">
+        <span>I understand these changes and data flow.</span>
+      </label>
+    </div>
+  </div>
+
+  <div class="footer">
+    <div class="proxy"><span class="dot"></span>Proxy stopped</div>
+    <div class="blocker" id="blocker">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 2.5 14.5 13.5H1.5z"/><path d="M8 6.5v3.2M8 11.8v.4"/></svg>
+      Confirm the changes and data flow to continue.
+    </div>
+    <div class="btns">
+      <button class="btn" type="button">Back</button>
+      <button class="btn primary" type="button" id="start" disabled>Start routing</button>
+    </div>
+  </div>
+</div>
+
+<div class="caption">
+  <span><b>1160 wide</b> — profile and prerequisites left, generated file right, the consent gate above the button it gates</span>
+  <span><b>Tick the checkbox</b> — Start routing only enables once the changes are acknowledged</span>
+  <span><b>Sample data</b> — the TOML is what SwitchyardConfigWriter renders for this profile, with example model IDs</span>
+</div>
+
+<script>
+  // Start routing needs every prerequisite AND the explicit acknowledgement,
+  // mirroring `!model.canApply || !readiness.isReady || !acknowledgedSideEffects`.
+  (function () {
+    var ack = document.getElementById("ack");
+    var start = document.getElementById("start");
+    var blocker = document.getElementById("blocker");
+
+    ack.addEventListener("change", function () {
+      start.disabled = !ack.checked;
+      blocker.style.visibility = ack.checked ? "hidden" : "visible";
+    });
+  })();
+</script>

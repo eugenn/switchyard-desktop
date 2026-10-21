@@ -1,0 +1,1128 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+//! Trajectory-judge components for the escalation router — the judge, its verdict policy, and
+//! the transcript condenser they read.
+//!
+//! [`build_judge`] is the whole surface; the confirmation policy that consumes its verdicts
+//! lives with the assembled algorithm in [`crate::algorithms::escalation`].
+
+use serde::Deserialize;
+use serde_json::Value;
+use switchyard_protocol::{Category, ContentBlock, InstructionBlock, Message, Role};
+
+use super::classifier_contract::{ClassifierContract, ClassifierContractConfig, validate_prompt};
+use super::llm_judge::{
+    ClassifierInput, JudgeClassifier, JudgePolicy, JudgeRuntimeConfig, SerdeDecoder,
+    StructuredJudge,
+};
+use crate::core::algorithm::Driver;
+use crate::core::classifier::{Classification, Score};
+use crate::core::state::State;
+use crate::{LibsyError, Result};
+use switchyard_protocol::Request;
+
+const PROMPT_TEMPLATE: &str = include_str!("../../prompts/escalation/prompt.md");
+const DEESCALATION_PROMPT: &str = include_str!("../../prompts/escalation/deescalation.md");
+const SCHEMA_TEMPLATE: &str = include_str!("../../prompts/escalation/schema.json");
+
+/// Separator marking where [`truncate_middle`] dropped a message's interior.
+const TRIM_MARKER: &str = " ...[trimmed] ";
+
+/// Suffix marking a transcript cut off by [`MAX_REQUEST_CHARS`].
+const TRUNCATION_SUFFIX: &str = "...<truncated>";
+
+/// Per-message cap for system and developer anchors, which carry no trajectory signal but
+/// which coding-agent harnesses make very large.
+const SYSTEM_CHARS: usize = 1_000;
+
+/// Per-message cap for task-framing user messages — every user message that precedes the first
+/// assistant reply. Coding-agent harnesses often send environment boilerplate as the first user
+/// message and the task itself as the second, so anchoring only the first would pin the
+/// boilerplate and let the task scroll out of the window. Feature specifications run to several
+/// thousand characters, so this gets the widest anchor budget.
+const TASK_CHARS: usize = 4_000;
+
+/// Backstop on the assembled transcript; the per-message caps normally bind first.
+const MAX_REQUEST_CHARS: usize = 18_000;
+
+/// Optional policy for returning an escalated session to the efficient tier.
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeescalationConfig {
+    /// Minimum number of capable-tier turns before the judge may release the session.
+    pub strong_min_calls: u32,
+    /// Optional hard limit on capable-tier turns before a forced return.
+    #[serde(default)]
+    pub strong_max_calls: Option<u32>,
+    /// Consecutive judge declines required to return to the efficient tier.
+    pub confirmations: u32,
+    /// Efficient calls served without judging after a hard-limit return.
+    #[serde(default)]
+    pub weak_cooldown_calls: u32,
+}
+
+impl DeescalationConfig {
+    fn validate(&self) -> Result<()> {
+        let reject = |message: &str| {
+            Err(LibsyError::AlgorithmError {
+                message: message.to_string(),
+            })
+        };
+        if self.strong_min_calls == 0 {
+            return reject("deescalation.strong_min_calls must be at least 1");
+        }
+        if self.confirmations == 0 {
+            return reject("deescalation.confirmations must be at least 1");
+        }
+        if self
+            .strong_max_calls
+            .is_some_and(|strong_max_calls| strong_max_calls < self.strong_min_calls)
+        {
+            return reject(
+                "deescalation.strong_max_calls must be at least deescalation.strong_min_calls",
+            );
+        }
+        Ok(())
+    }
+}
+
+/// The tuning surface for the trajectory judge.
+///
+/// The routing settings retain their benchmarked defaults. Everything else is a fixed invariant
+/// (the constants above).
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct EscalationJudgeConfig {
+    /// Consecutive fresh-evidence verdicts in the same category required before a turn moves to
+    /// the capable tier, which is also the turn that latches the session. Any decline or stale
+    /// evidence clears the streak.
+    /// `1` escalates on the first verdict; the router's main cost dial.
+    /// `2` or higher needs a session id, since the streak is retained per session.
+    pub confirmations: u32,
+    /// Trailing messages shown on top of the anchors. A loop longer than this is invisible.
+    pub recent_turn_window: usize,
+    /// Per-message cap inside the trailing window.
+    pub window_message_chars: usize,
+    /// De-escalation policy. `None` preserves permanent latching to the capable tier.
+    pub deescalation: Option<DeescalationConfig>,
+}
+
+impl EscalationJudgeConfig {
+    /// Rejects settings that would leave the judge with nothing useful to read.
+    fn validate(&self) -> Result<()> {
+        let reject = |message: String| Err(LibsyError::AlgorithmError { message });
+        if self.confirmations == 0 {
+            return reject("confirmations must be at least 1".to_string());
+        }
+        if self.recent_turn_window == 0 {
+            return reject("recent_turn_window must be at least 1".to_string());
+        }
+        if self.window_message_chars < 50 {
+            return reject(format!(
+                "window_message_chars must be at least 50, got {}",
+                self.window_message_chars
+            ));
+        }
+        if let Some(deescalation) = self.deescalation {
+            deescalation.validate()?;
+        }
+        Ok(())
+    }
+}
+
+impl Default for EscalationJudgeConfig {
+    fn default() -> Self {
+        Self {
+            confirmations: 2,
+            recent_turn_window: 28,
+            window_message_chars: 500,
+            deescalation: None,
+        }
+    }
+}
+
+/// Router-controlled phase attached to judge input when de-escalation is enabled.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum EvaluationPhase {
+    Efficient,
+    Strong,
+}
+
+impl EvaluationPhase {
+    fn marker(self) -> &'static str {
+        match self {
+            Self::Efficient => "EFFICIENT_EVALUATION",
+            Self::Strong => "STRONG_EVALUATION",
+        }
+    }
+}
+
+/// Bounded trouble pattern used to correlate escalation confirmations across turns.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum EscalationCategory {
+    None,
+    Repetition,
+    FalseProgress,
+    Drift,
+    Desperation,
+    CapabilityGap,
+}
+
+impl EscalationCategory {
+    /// Stable state and telemetry label.
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Repetition => "repetition",
+            Self::FalseProgress => "false_progress",
+            Self::Drift => "drift",
+            Self::Desperation => "desperation",
+            Self::CapabilityGap => "capability_gap",
+        }
+    }
+}
+
+/// The judge's typed verdict, including the evidence needed to confirm a stable pattern.
+#[derive(Deserialize)]
+pub(crate) struct EscalationVerdict {
+    pub(crate) escalate: bool,
+    pub(crate) category: EscalationCategory,
+    pub(crate) new_evidence: bool,
+    pub(crate) reason: String,
+}
+
+/// Builds the condensed trajectory presented to the escalation judge.
+pub(crate) struct EscalationInput {
+    config: EscalationJudgeConfig,
+    phase: Option<EvaluationPhase>,
+}
+
+impl ClassifierInput for EscalationInput {
+    fn build_messages(&self, _state: &State, request: &Request) -> Vec<Message> {
+        let summary = summarize_for_judge(
+            &request.llm_request.instructions,
+            &request.llm_request.messages,
+            conversation_turn(request),
+            self.phase,
+            &self.config,
+        );
+        vec![Message::text(Role::User, summary)]
+    }
+}
+
+/// Structured trajectory judge with a typed escalation verdict.
+pub(crate) type EscalationJudge = StructuredJudge<EscalationInput, SerdeDecoder<EscalationVerdict>>;
+
+/// Maps the judge's verdict to a classification. A verdict names the tier to serve — capable
+/// on escalate, efficient on decline — so the caller reads it straight off the winning score.
+/// [`Classification::Ambiguous`] carries the unavailable case, which names no tier: both a
+/// decline and an outage stay efficient, but only a decline is evidence, so only a decline
+/// clears the streak.
+pub(crate) struct EscalationPolicy {
+    phase: Option<EvaluationPhase>,
+}
+
+impl JudgePolicy for EscalationPolicy {
+    type Verdict = EscalationVerdict;
+
+    fn to_classification(
+        &self,
+        verdict: Option<&EscalationVerdict>,
+        driver: &Driver,
+    ) -> Result<Classification> {
+        if let Some(verdict) = verdict {
+            tracing::debug!(
+                escalate = verdict.escalate,
+                reason = %verdict.reason,
+                "escalation judge verdict"
+            );
+        }
+        match verdict {
+            Some(verdict) if verdict.escalate => Ok(Classification::Scores(vec![Score {
+                target: driver.first_model_for(&Category::Capable)?.clone(),
+                confidence: 1.0,
+                category: Some(Category::Capable),
+            }])),
+            Some(_) => Ok(Classification::Scores(vec![Score {
+                target: driver.first_model_for(&Category::Efficient)?.clone(),
+                confidence: 1.0,
+                category: Some(Category::Efficient),
+            }])),
+            None => Ok(Classification::Ambiguous(Vec::new())),
+        }
+    }
+}
+
+/// Maps present verdicts to phase-aware evidence; absent verdicts add nothing.
+fn escalation_evidence(
+    policy: &EscalationPolicy,
+    verdict: Option<&EscalationVerdict>,
+) -> Option<Value> {
+    verdict.map(|verdict| {
+        let verdict = match (policy.phase, verdict.escalate) {
+            (Some(EvaluationPhase::Strong), true) => "retain",
+            (Some(EvaluationPhase::Strong), false) => "deescalate",
+            (_, true) => "escalate",
+            (_, false) => "continue",
+        };
+        serde_json::json!({
+            "source": "escalation",
+            "verdict": verdict,
+        })
+    })
+}
+
+/// Builds the trajectory judge, scoring the runtime capable category when it escalates.
+///
+/// Loads the packaged prompt and schema, so an unusable asset or an unusable `config` value
+/// fails here rather than on the first request.
+pub(crate) fn build_judge(
+    contract_config: &ClassifierContractConfig,
+    config: EscalationJudgeConfig,
+    phase: Option<EvaluationPhase>,
+    max_output_tokens: u64,
+) -> Result<JudgeClassifier<EscalationJudge, EscalationPolicy>> {
+    config.validate()?;
+    let contract = build_contract(contract_config, phase.is_some())?;
+    Ok(JudgeClassifier::new(
+        StructuredJudge::new(
+            EscalationInput { config, phase },
+            contract,
+            SerdeDecoder::new(),
+            JudgeRuntimeConfig::new(max_output_tokens)?,
+        ),
+        EscalationPolicy { phase },
+    )
+    .with_evidence(escalation_evidence))
+}
+
+fn build_contract(
+    contract_config: &ClassifierContractConfig,
+    phase_aware: bool,
+) -> Result<ClassifierContract> {
+    let prompt = contract_config.prompt().unwrap_or(PROMPT_TEMPLATE);
+    validate_prompt(prompt)?;
+    let phase_aware_config = phase_aware.then(|| {
+        contract_config.clone().with_prompt(format!(
+            "{}\n\n{}",
+            prompt.trim_end(),
+            DEESCALATION_PROMPT.trim()
+        ))
+    });
+    let contract_config = phase_aware_config.as_ref().unwrap_or(contract_config);
+    ClassifierContract::from_config(contract_config, PROMPT_TEMPLATE, SCHEMA_TEMPLATE)
+}
+
+/// The 1-indexed model invocation the transcript ends on: one per assistant reply.
+///
+/// The judge reads the turn *including* the reply it is judging, so the newest assistant
+/// message is this turn — no `+ 1`. Counting the caller's request instead would report the
+/// turn after the one under judgement.
+///
+/// Messages are already normalized by `switchyard-protocol`, so this needs no
+/// per-format branching.
+pub(crate) fn conversation_turn(request: &Request) -> usize {
+    request
+        .llm_request
+        .messages
+        .iter()
+        .filter(|message| message.role == Role::Assistant)
+        .count()
+}
+
+/// Flattens a message to plain text, tool calls and tool results included.
+///
+/// [`Message::text_content`] is deliberately not used here: it keeps only text and refusal
+/// blocks, which would erase exactly the repeated-command signal the judge's loop detection
+/// relies on.
+fn message_text(message: &Message) -> String {
+    let mut parts = Vec::new();
+    let terminus_commands = if message.role == Role::Assistant {
+        message
+            .content
+            .iter()
+            .filter_map(|block| match block {
+                ContentBlock::ToolCall(call) if call.name == "bash_command" => call
+                    .arguments
+                    .get("keystrokes")
+                    .and_then(|value| value.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    collect_text(&message.content, &mut parts, &terminus_commands);
+    parts.join(" ")
+}
+
+/// Removes a Terminus command batch when a structured bash call carries the same action.
+///
+/// The model-facing request remains untouched. Only the judge's plain-text view is normalized,
+/// so one action cannot look like two attempts while the agent still sees its native history.
+fn without_duplicated_terminus_commands(text: &str, tool_commands: &[&str]) -> String {
+    let mut normalized_text = String::with_capacity(text.len());
+    let mut unmatched_tool_commands = tool_commands.to_vec();
+    let mut copied_through = 0;
+    let mut scan_from = 0;
+
+    while let Some(relative_start) = text[scan_from..].find('{') {
+        let start = scan_from + relative_start;
+
+        let mut values =
+            serde_json::Deserializer::from_str(&text[start..]).into_iter::<serde_json::Value>();
+        let Some(Ok(mut value)) = values.next() else {
+            scan_from = start + 1;
+            continue;
+        };
+        let end = start + values.byte_offset();
+        let Some(commands) = value
+            .get("commands")
+            .and_then(|commands| commands.as_array())
+        else {
+            scan_from = start + 1;
+            continue;
+        };
+        let Some(command_batch) = commands
+            .iter()
+            .map(|command| command.get("keystrokes").and_then(|value| value.as_str()))
+            .collect::<Option<Vec<_>>>()
+        else {
+            scan_from = start + 1;
+            continue;
+        };
+        let mut remaining_tool_commands = unmatched_tool_commands.clone();
+        let fully_encoded = command_batch.iter().all(|command| {
+            let Some(index) = remaining_tool_commands
+                .iter()
+                .position(|candidate| candidate == command)
+            else {
+                return false;
+            };
+            remaining_tool_commands.swap_remove(index);
+            true
+        });
+        if command_batch.is_empty() || !fully_encoded {
+            scan_from = start + 1;
+            continue;
+        }
+
+        value["commands"] = serde_json::Value::Array(Vec::new());
+        let Ok(normalized) = serde_json::to_string(&value) else {
+            scan_from = start + 1;
+            continue;
+        };
+        normalized_text.push_str(&text[copied_through..start]);
+        normalized_text.push_str(&normalized);
+        copied_through = end;
+        scan_from = end;
+        unmatched_tool_commands = remaining_tool_commands;
+    }
+    normalized_text.push_str(&text[copied_through..]);
+    normalized_text
+}
+
+/// Appends the judge-relevant text of each block, descending into tool results.
+fn collect_text(content: &[ContentBlock], parts: &mut Vec<String>, tool_commands: &[&str]) {
+    for block in content {
+        match block {
+            ContentBlock::Text { text } | ContentBlock::Refusal { text } => {
+                parts.push(without_duplicated_terminus_commands(text, tool_commands));
+            }
+            ContentBlock::ToolCall(call) => {
+                parts.push(format!("tool_call {}({})", call.name, call.arguments));
+            }
+            ContentBlock::ToolResult(result) => collect_text(&result.content, parts, &[]),
+            _ => {}
+        }
+    }
+}
+
+/// Keeps the head and tail of `text` within `limit` characters.
+///
+/// The head gets two thirds of the surviving budget: for a trajectory judge the command or
+/// error signature that opens a message carries more signal than its trailing output.
+fn truncate_middle(text: &str, limit: usize) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= limit {
+        return text.to_string();
+    }
+    let keep = limit
+        .saturating_sub(TRIM_MARKER.chars().count())
+        .max(20)
+        .min(chars.len());
+    let head = keep * 2 / 3;
+    let tail = keep - head;
+    let mut out: String = chars[..head].iter().collect();
+    out.push_str(TRIM_MARKER);
+    out.extend(chars[chars.len() - tail..].iter());
+    out
+}
+
+/// Renders a compact role-labelled transcript for the judge.
+///
+/// Task-framing user messages are capped individually. System/developer instructions share
+/// the remaining budget after reserving space for task framing and the newest window entry.
+/// The trailing window carries recent activity. A coverage header states how much history is
+/// not shown, so the judge can reason about pace rather than assuming it sees everything.
+///
+/// When the assembled text still exceeds `max_request_chars`, the oldest window lines go
+/// first: for a trajectory judge the newest evidence is strictly the most valuable.
+fn summarize_for_judge(
+    instructions: &[InstructionBlock],
+    messages: &[Message],
+    turn: usize,
+    phase: Option<EvaluationPhase>,
+    config: &EscalationJudgeConfig,
+) -> String {
+    let mut instruction_anchors: Vec<String> = Vec::new();
+    let mut anchors: Vec<String> = Vec::new();
+    let mut window: Vec<String> = Vec::new();
+    let mut assistant_seen = false;
+
+    for instruction in instructions {
+        let mut parts = Vec::new();
+        collect_text(&instruction.content, &mut parts, &[]);
+        instruction_anchors.push(format!(
+            "[{}] {}",
+            role_label(instruction.role),
+            truncate_middle(&parts.join(" "), SYSTEM_CHARS)
+        ));
+    }
+
+    for message in messages {
+        let text = message_text(message);
+        match message.role {
+            Role::System | Role::Developer => instruction_anchors.push(format!(
+                "[{}] {}",
+                role_label(message.role),
+                truncate_middle(&text, SYSTEM_CHARS)
+            )),
+            // Everything the user said before the agent first replied is task framing.
+            Role::User if !assistant_seen => {
+                anchors.push(format!(
+                    "[user (task)] {}",
+                    truncate_middle(&text, TASK_CHARS)
+                ));
+            }
+            role => {
+                if role == Role::Assistant {
+                    assistant_seen = true;
+                }
+                window.push(format!(
+                    "[{}] {}",
+                    role_label(role),
+                    truncate_middle(&text, config.window_message_chars)
+                ));
+            }
+        }
+    }
+
+    if window.len() > config.recent_turn_window {
+        window.drain(..window.len() - config.recent_turn_window);
+    }
+
+    let assemble = |instructions: Option<&str>, window: &[String]| {
+        let header = format!(
+            "Conversation turn {turn}; showing the last {} of {} messages after the task framing.",
+            window.len(),
+            messages.len(),
+        );
+        phase
+            .map(|phase| format!("Routing phase: {}", phase.marker()))
+            .into_iter()
+            .chain(std::iter::once(header))
+            .chain(instructions.map(str::to_owned))
+            .chain(anchors.iter().cloned())
+            .chain(window.iter().cloned())
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    let reserved = assemble(None, &window[window.len().saturating_sub(1)..])
+        .chars()
+        .count();
+    let instruction_budget = MAX_REQUEST_CHARS.saturating_sub(reserved + 1);
+    // The remaining budget may be smaller than truncate_middle's minimum retained span.
+    let instruction_text = truncate_middle(&instruction_anchors.join("\n"), instruction_budget)
+        .chars()
+        .take(instruction_budget)
+        .collect::<String>();
+    let instructions = (!instruction_text.is_empty()).then_some(instruction_text.as_str());
+    let mut text = assemble(instructions, &window);
+    while text.chars().count() > MAX_REQUEST_CHARS && !window.is_empty() {
+        window.remove(0);
+        text = assemble(instructions, &window);
+    }
+    if text.chars().count() > MAX_REQUEST_CHARS {
+        let keep = MAX_REQUEST_CHARS.saturating_sub(TRUNCATION_SUFFIX.chars().count() + 1);
+        text = text.chars().take(keep).collect::<String>() + TRUNCATION_SUFFIX;
+    }
+    text
+}
+
+/// The transcript label for a role.
+fn role_label(role: Role) -> &'static str {
+    match role {
+        Role::System => "system",
+        Role::Developer => "developer",
+        Role::User => "user",
+        Role::Assistant => "assistant",
+        Role::Tool => "tool",
+    }
+}
+
+/// A request whose conversation sits at `turn`: `turn - 1` prior assistant replies, each
+/// answered by a further user message.
+///
+/// Shared with the assembled router's tests, which drive the same conversation shape.
+#[cfg(test)]
+pub(crate) fn request_at_turn(session_id: Option<&str>, turn: usize) -> Request {
+    use switchyard_protocol::{LlmRequest, Metadata};
+
+    let mut messages = vec![Message::text(Role::User, "What is 2+2?")];
+    for attempt in 1..turn {
+        messages.push(Message::text(Role::Assistant, format!("attempt {attempt}")));
+        messages.push(Message::text(Role::User, format!("still wrong {attempt}")));
+    }
+    Request {
+        llm_request: LlmRequest {
+            model: Some("auto".to_string()),
+            messages,
+            ..LlmRequest::default()
+        },
+        raw_request: None,
+        metadata: session_id.map(|id| Metadata {
+            session_id: Some(id.to_string()),
+            ..Metadata::default()
+        }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+    use switchyard_protocol::{ContentBlock, Message, Role, ToolCall, ToolResult};
+
+    use super::*;
+    use crate::algorithms::util::llm_judge::Judge;
+
+    fn escalation_judge(
+        max_output_tokens: u64,
+        phase: Option<EvaluationPhase>,
+        contract_config: &ClassifierContractConfig,
+    ) -> Result<EscalationJudge> {
+        Ok(StructuredJudge::new(
+            EscalationInput {
+                config: EscalationJudgeConfig::default(),
+                phase,
+            },
+            build_contract(contract_config, phase.is_some())?,
+            SerdeDecoder::new(),
+            JudgeRuntimeConfig::new(max_output_tokens)?,
+        ))
+    }
+
+    #[test]
+    fn judge_request_is_rubric_plus_summary_under_a_completion_cap() -> Result<()> {
+        let judge = escalation_judge(
+            super::super::DEFAULT_JUDGE_MAX_OUTPUT_TOKENS,
+            None,
+            &ClassifierContractConfig::default(),
+        )?;
+
+        // As the classifier calls it: the turn's reply is already on the transcript.
+        let mut judged = request_at_turn(None, 4);
+        judged.llm_request.instructions = [
+            (Role::System, "system constraint"),
+            (Role::Developer, "developer constraint"),
+        ]
+        .into_iter()
+        .map(|(role, text)| InstructionBlock {
+            role,
+            content: Message::text(role, text).content,
+        })
+        .collect();
+        judged
+            .llm_request
+            .messages
+            .push(Message::text(Role::Assistant, "this turn's reply"));
+        let built = judge.build_request(&State::default(), &judged);
+
+        // Rubric in instructions, condensed trajectory as the sole user message.
+        assert_eq!(built.llm_request.instructions.len(), 1);
+        assert_eq!(built.llm_request.instructions[0].role, Role::System);
+        assert_eq!(
+            built.llm_request.instructions[0].content.as_slice(),
+            &[ContentBlock::Text {
+                text: PROMPT_TEMPLATE.to_string()
+            }]
+        );
+        assert_eq!(built.llm_request.messages.len(), 1);
+        assert_eq!(built.llm_request.messages[0].role, Role::User);
+        let summary = built.llm_request.messages[0]
+            .text_content("")
+            .expect("summary");
+        assert!(summary.contains("Conversation turn 4"));
+        assert!(summary.contains(
+            "[system] system constraint\n[developer] developer constraint\n[user (task)] What is 2+2?"
+        ));
+        assert!(summary.contains("[assistant] this turn's reply"));
+        assert!(!summary.contains("Routing phase:"));
+        // Bounded output, so a reasoning judge cannot run away mid-verdict.
+        assert_eq!(
+            built.llm_request.output.max_output_tokens,
+            Some(super::super::DEFAULT_JUDGE_MAX_OUTPUT_TOKENS)
+        );
+        assert!(built.llm_request.output.response_format.is_some());
+
+        judged.llm_request.instructions.extend(vec![
+            InstructionBlock {
+                role: Role::Developer,
+                content: Message::text(Role::Developer, "x".repeat(SYSTEM_CHARS)).content,
+            };
+            MAX_REQUEST_CHARS / SYSTEM_CHARS + 1
+        ]);
+        let built = judge.build_request(&State::default(), &judged);
+        let summary = built.llm_request.messages[0]
+            .text_content("")
+            .expect("summary");
+        assert!(summary.chars().count() <= MAX_REQUEST_CHARS);
+        assert!(summary.contains(TRIM_MARKER));
+        assert!(summary.contains("[system] system constraint"));
+        assert!(summary.contains("[developer] developer constraint"));
+        assert!(summary.contains("[user (task)] What is 2+2?"));
+        assert!(summary.contains("[assistant] this turn's reply"));
+        Ok(())
+    }
+
+    #[test]
+    fn judge_request_uses_the_configured_completion_cap() -> Result<()> {
+        let judge = escalation_judge(512, None, &ClassifierContractConfig::default())?;
+
+        let built = judge.build_request(&State::default(), &request_at_turn(None, 1));
+
+        assert_eq!(built.llm_request.output.max_output_tokens, Some(512));
+        Ok(())
+    }
+
+    #[test]
+    fn conversation_turn_counts_assistant_replies() {
+        // The judge is handed the transcript with this turn's reply already appended, which
+        // is the shape asserted here: a request entering turn N plus its reply *is* turn N.
+        for turn in [1, 5] {
+            let mut judged = request_at_turn(None, turn);
+            judged
+                .llm_request
+                .messages
+                .push(Message::text(Role::Assistant, "this turn's reply"));
+            assert_eq!(conversation_turn(&judged), turn);
+        }
+    }
+
+    #[test]
+    fn message_text_keeps_tool_calls_and_results() {
+        let call = Message {
+            role: Role::Assistant,
+            content: vec![
+                ContentBlock::Text {
+                    text: "running it".to_string(),
+                },
+                ContentBlock::ToolCall(ToolCall {
+                    id: "call-1".to_string(),
+                    name: "bash".to_string(),
+                    arguments: json!({"cmd": "ls"}),
+                }),
+            ],
+        };
+        let text = message_text(&call);
+        assert!(text.contains("running it"), "{text}");
+        assert!(text.contains(r#"tool_call bash({"cmd":"ls"})"#), "{text}");
+
+        let result = Message {
+            role: Role::Tool,
+            content: vec![ContentBlock::ToolResult(ToolResult {
+                tool_call_id: "call-1".to_string(),
+                content: vec![ContentBlock::Text {
+                    text: "no such file".to_string(),
+                }],
+                is_error: Some(true),
+            })],
+        };
+        assert_eq!(message_text(&result), "no such file");
+    }
+
+    /// A raw command batch fully mirrored by structured tool calls is emptied in the judge view.
+    #[test]
+    fn message_text_deduplicates_terminus_commands_for_the_judge() {
+        let first_command = "grep -n bug app.py\n";
+        let second_command = "sed -n '1,80p' app.py\n";
+        let message = Message {
+            role: Role::Assistant,
+            content: vec![
+                ContentBlock::Text {
+                    text: format!(
+                        "Before\n```json\n{}\n```\nAfter",
+                        json!({
+                            "analysis": "inspect the reported file",
+                            "commands": [
+                                {"keystrokes": first_command, "duration": 0.1},
+                                {"keystrokes": second_command, "duration": 0.1},
+                            ],
+                        })
+                    ),
+                },
+                ContentBlock::ToolCall(ToolCall {
+                    id: "call-1".to_string(),
+                    name: "bash_command".to_string(),
+                    arguments: json!({"keystrokes": first_command, "duration": 0.1}),
+                }),
+                ContentBlock::ToolCall(ToolCall {
+                    id: "call-2".to_string(),
+                    name: "bash_command".to_string(),
+                    arguments: json!({"keystrokes": second_command, "duration": 0.1}),
+                }),
+            ],
+        };
+
+        let text = message_text(&message);
+
+        assert!(text.contains("inspect the reported file"), "{text}");
+        assert!(text.contains("Before"), "{text}");
+        assert!(text.contains("After"), "{text}");
+        assert!(text.contains(r#""commands":[]"#), "{text}");
+        assert_eq!(text.matches("grep -n bug app.py").count(), 1, "{text}");
+        assert_eq!(text.matches("sed -n '1,80p' app.py").count(), 1, "{text}");
+        assert_eq!(text.matches("tool_call bash_command(").count(), 2, "{text}");
+    }
+
+    /// Each structured tool call can absorb only one rendered batch, so a repeated batch stays.
+    #[test]
+    fn message_text_deduplicates_multiple_batches_once_per_tool_call() {
+        let first_command = "grep -n bug app.py\n";
+        let second_command = "sed -n '1,80p' app.py\n";
+        let batch = |command| {
+            json!({
+                "analysis": "inspect",
+                "commands": [{"keystrokes": command}],
+            })
+            .to_string()
+        };
+        let message = Message {
+            role: Role::Assistant,
+            content: vec![
+                ContentBlock::Text {
+                    text: format!(
+                        "First {} second {} repeated {}",
+                        batch(first_command),
+                        batch(second_command),
+                        batch(first_command)
+                    ),
+                },
+                ContentBlock::ToolCall(ToolCall {
+                    id: "call-1".to_string(),
+                    name: "bash_command".to_string(),
+                    arguments: json!({"keystrokes": first_command}),
+                }),
+                ContentBlock::ToolCall(ToolCall {
+                    id: "call-2".to_string(),
+                    name: "bash_command".to_string(),
+                    arguments: json!({"keystrokes": second_command}),
+                }),
+            ],
+        };
+
+        let text = message_text(&message);
+
+        assert_eq!(text.matches(r#""commands":[]"#).count(), 2, "{text}");
+        assert_eq!(text.matches("grep -n bug app.py").count(), 2, "{text}");
+        assert_eq!(text.matches("sed -n '1,80p' app.py").count(), 1, "{text}");
+    }
+
+    /// A rendered batch stays when no structured tool call carries the same command.
+    #[test]
+    fn message_text_keeps_terminus_commands_without_matching_tool_call() {
+        let command = "grep -n bug app.py\n";
+        let text = json!({
+            "analysis": "inspect the reported file",
+            "commands": [{"keystrokes": command}],
+        })
+        .to_string();
+        let without_tool_call = Message {
+            role: Role::Assistant,
+            content: vec![ContentBlock::Text { text: text.clone() }],
+        };
+        let mismatched_tool_call = Message {
+            role: Role::Assistant,
+            content: vec![
+                ContentBlock::Text { text },
+                ContentBlock::ToolCall(ToolCall {
+                    id: "call-1".to_string(),
+                    name: "bash_command".to_string(),
+                    arguments: json!({"keystrokes": "sed -n '1,20p' app.py\n", "duration": 0.1}),
+                }),
+            ],
+        };
+
+        assert_eq!(
+            message_text(&without_tool_call)
+                .matches("grep -n bug app.py")
+                .count(),
+            1
+        );
+        assert_eq!(
+            message_text(&mismatched_tool_call)
+                .matches("grep -n bug app.py")
+                .count(),
+            1
+        );
+    }
+
+    /// A batch stays intact when only some of its commands have matching tool calls.
+    #[test]
+    fn message_text_keeps_a_partially_encoded_terminus_batch() {
+        let first_command = "grep -n bug app.py\n";
+        let second_command = "sed -n '1,80p' app.py\n";
+        let message = Message {
+            role: Role::Assistant,
+            content: vec![
+                ContentBlock::Text {
+                    text: json!({
+                        "commands": [
+                            {"keystrokes": first_command},
+                            {"keystrokes": second_command},
+                        ],
+                    })
+                    .to_string(),
+                },
+                ContentBlock::ToolCall(ToolCall {
+                    id: "call-1".to_string(),
+                    name: "bash_command".to_string(),
+                    arguments: json!({"keystrokes": first_command}),
+                }),
+            ],
+        };
+
+        let text = message_text(&message);
+
+        assert_eq!(text.matches("grep -n bug app.py").count(), 2, "{text}");
+        assert_eq!(text.matches("sed -n '1,80p' app.py").count(), 1, "{text}");
+        assert!(!text.contains(r#""commands":[]"#), "{text}");
+    }
+
+    /// Duplicate commands in one batch need one tool call each before the batch is removed.
+    #[test]
+    fn message_text_keeps_duplicate_commands_without_one_tool_call_each() {
+        let command = "grep -n bug app.py\n";
+        let message = Message {
+            role: Role::Assistant,
+            content: vec![
+                ContentBlock::Text {
+                    text: json!({
+                        "commands": [
+                            {"keystrokes": command},
+                            {"keystrokes": command},
+                        ],
+                    })
+                    .to_string(),
+                },
+                ContentBlock::ToolCall(ToolCall {
+                    id: "call-1".to_string(),
+                    name: "bash_command".to_string(),
+                    arguments: json!({"keystrokes": command}),
+                }),
+            ],
+        };
+
+        let text = message_text(&message);
+
+        assert_eq!(text.matches("grep -n bug app.py").count(), 3, "{text}");
+        assert!(!text.contains(r#""commands":[]"#), "{text}");
+    }
+
+    #[test]
+    fn truncate_middle_keeps_head_and_tail() {
+        let text = "a".repeat(40) + &"z".repeat(40);
+        let trimmed = truncate_middle(&text, 50);
+        assert!(trimmed.chars().count() <= 50, "{trimmed}");
+        assert!(trimmed.starts_with('a'));
+        assert!(trimmed.ends_with('z'));
+        assert!(trimmed.contains("[trimmed]"));
+
+        // Under the limit the text is returned untouched.
+        assert_eq!(truncate_middle("short", 50), "short");
+    }
+
+    #[test]
+    fn deescalation_settings_must_be_valid() {
+        let zero = EscalationJudgeConfig {
+            deescalation: Some(DeescalationConfig {
+                strong_min_calls: 0,
+                strong_max_calls: None,
+                confirmations: 2,
+                weak_cooldown_calls: 0,
+            }),
+            ..EscalationJudgeConfig::default()
+        };
+        assert!(
+            zero.validate()
+                .is_err_and(|error| error.to_string().contains("at least 1"))
+        );
+
+        let inverted = EscalationJudgeConfig {
+            deescalation: Some(DeescalationConfig {
+                strong_min_calls: 4,
+                strong_max_calls: Some(3),
+                confirmations: 2,
+                weak_cooldown_calls: 0,
+            }),
+            ..EscalationJudgeConfig::default()
+        };
+        assert!(
+            inverted
+                .validate()
+                .is_err_and(|error| error.to_string().contains("at least deescalation"))
+        );
+    }
+
+    #[test]
+    fn deescalation_contract_marks_both_routing_phases() -> Result<()> {
+        let contract = ClassifierContractConfig::default().with_prompt("Custom trajectory rubric.");
+        for (phase, marker) in [
+            (EvaluationPhase::Efficient, "EFFICIENT_EVALUATION"),
+            (EvaluationPhase::Strong, "STRONG_EVALUATION"),
+        ] {
+            let judge = escalation_judge(512, Some(phase), &contract)?;
+            let built = judge.build_request(&State::default(), &request_at_turn(None, 1));
+            let system_prompt = built.llm_request.instructions[0].content.iter().find_map(
+                |content| match content {
+                    ContentBlock::Text { text } => Some(text.as_str()),
+                    _ => None,
+                },
+            );
+            assert!(system_prompt.is_some_and(|prompt| {
+                prompt.starts_with("Custom trajectory rubric.")
+                    && prompt.contains("EFFICIENT_EVALUATION")
+                    && prompt.contains("STRONG_EVALUATION")
+            }));
+            assert!(
+                built.llm_request.messages[0]
+                    .text_content("")
+                    .is_some_and(|summary| summary.starts_with(&format!(
+                        "Routing phase: {marker}"
+                    )))
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn summary_keeps_anchors_and_the_recent_window() {
+        let mut messages = vec![
+            Message::text(Role::System, "you are a coding agent"),
+            Message::text(Role::User, "fix the failing test"),
+        ];
+        for i in 0..10 {
+            messages.push(Message::text(Role::Assistant, format!("step {i}")));
+        }
+        let config = EscalationJudgeConfig {
+            recent_turn_window: 3,
+            ..EscalationJudgeConfig::default()
+        };
+
+        let summary = summarize_for_judge(&[], &messages, 11, None, &config);
+
+        assert!(
+            summary.contains("[system] you are a coding agent"),
+            "{summary}"
+        );
+        assert!(
+            summary.contains("[user (task)] fix the failing test"),
+            "{summary}"
+        );
+        assert!(summary.contains("Conversation turn 11; showing the last 3 of 12 messages"));
+        // Only the newest window entries survive.
+        assert!(summary.contains("step 9"), "{summary}");
+        assert!(summary.contains("step 7"), "{summary}");
+        assert!(!summary.contains("step 6"), "{summary}");
+    }
+
+    #[test]
+    fn summary_anchors_every_user_message_before_the_first_reply() {
+        // Codex sends environment boilerplate as the first user message and the task as the
+        // second. Both are framing; the task must stay visible after the window has moved on.
+        let mut messages = vec![
+            Message::text(
+                Role::Developer,
+                "<skills_instructions>...</skills_instructions>",
+            ),
+            Message::text(
+                Role::User,
+                "<environment_context><cwd>/app</cwd></environment_context>",
+            ),
+            Message::text(Role::User, "Implement RFC 5545 timezone interop in rrule."),
+        ];
+        for i in 0..40 {
+            messages.push(Message::text(Role::Assistant, format!("step {i}")));
+            messages.push(Message::text(Role::User, format!("later user note {i}")));
+        }
+        let config = EscalationJudgeConfig {
+            recent_turn_window: 3,
+            ..EscalationJudgeConfig::default()
+        };
+
+        let summary = summarize_for_judge(&[], &messages, 40, None, &config);
+
+        assert!(
+            summary.contains("[user (task)] <environment_context>"),
+            "{summary}"
+        );
+        assert!(
+            summary.contains("[user (task)] Implement RFC 5545 timezone interop in rrule."),
+            "{summary}"
+        );
+        // User messages after the first reply are ordinary window entries, not anchors.
+        assert!(
+            !summary.contains("[user (task)] later user note"),
+            "{summary}"
+        );
+        assert!(summary.contains("[user] later user note 39"), "{summary}");
+        assert!(!summary.contains("later user note 0\n"), "{summary}");
+    }
+
+    #[test]
+    fn summary_drops_oldest_window_lines_under_the_char_cap() {
+        // MAX_REQUEST_CHARS is a backstop, not a dial: at default settings the window caps
+        // bind first (28 x 500 plus anchors sits under it), so reaching it takes an unusually
+        // wide per-message cap. That is the point — it only fires on pathological input.
+        let mut messages = vec![
+            Message::text(Role::System, "framing"),
+            Message::text(Role::User, "task"),
+        ];
+        for i in 0..20 {
+            messages.push(Message::text(
+                Role::Assistant,
+                format!("{i} {}", "x".repeat(2_000)),
+            ));
+        }
+        let config = EscalationJudgeConfig {
+            window_message_chars: 2_000,
+            ..EscalationJudgeConfig::default()
+        };
+
+        let summary = summarize_for_judge(&[], &messages, 21, None, &config);
+
+        assert!(
+            summary.chars().count() <= MAX_REQUEST_CHARS,
+            "{}",
+            summary.chars().count()
+        );
+        // Anchors are never dropped, and the newest activity outlives the oldest.
+        assert!(summary.contains("[system] framing"), "{summary}");
+        assert!(summary.contains("[user (task)] task"), "{summary}");
+        assert!(summary.contains("19 xxx"), "{summary}");
+        assert!(!summary.contains("0 xxx"), "{summary}");
+    }
+}

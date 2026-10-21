@@ -1,0 +1,117 @@
+# Prometheus alert rules for a Switchyard deployment.
+#
+# Implements the operational and success-criterion alerts documented in
+# docs/internal/metrics_reference.md. Drop into Prometheus's rule_files: list and
+# validate with `promtool check rules switchyard.rules.yaml` before
+# reloading.
+#
+# Thresholds are conservative defaults. Review against your SLOs in
+# examples/prometheus/README.md before wiring to a pager.
+#
+# Ratio rules divide rates directly rather than clamping the denominator. A
+# clamped denominator silently rewrites the ratio at low request rates, which is
+# exactly when these alerts need to be trustworthy. Division by zero yields NaN,
+# every comparison against NaN is false, so a rule simply stays quiet with no
+# traffic instead of reporting a fabricated number. Windows are 15 m because a
+# 5 m window on a low-traffic deployment can hold a single response, and one
+# sample is not a rate.
+
+groups:
+  - name: switchyard.routing.evidence
+    rules:
+      - alert: RouterOverheadHigh
+        # Pathology detector, not a cost measurement. An algorithm that consults a
+        # classifier or judge spends a whole LLM call inside this histogram, so a
+        # sub-millisecond bar cannot hold for one. This threshold is set where any
+        # algorithm class is unambiguously stuck — a hung judge, an upstream that
+        # never returns, a retry storm inside routing. Per-algorithm on purpose:
+        # aggregating a passthrough algorithm and a classifier-backed one into a
+        # single histogram produces a quantile that describes neither. For the
+        # sub-millisecond success criterion on non-LLM algorithms, see the tuning
+        # notes in examples/prometheus/README.md.
+        expr: |
+          histogram_quantile(
+            0.99,
+            sum by (algorithm, le) (rate(switchyard_routing_overhead_ms_bucket[15m]))
+          ) > 10000
+        for: 15m
+        labels:
+          severity: warning
+          component: switchyard
+        annotations:
+          summary: "Switchyard routing overhead p99 above 10 s for {{ $labels.algorithm }}"
+          description: |
+            switchyard_routing_overhead_ms p99 for algorithm
+            {{ $labels.algorithm }} has exceeded 10 s for 15 minutes. Routing
+            overhead covers classifier and judge calls, target resolution, failed
+            attempts, and decision publication. Check whether the judge target is
+            responding at all: switchyard_algorithms_in_flight stuck above zero and
+            a rising switchyard_classifier_fail_open_total both point at the same
+            cause. Cross-check classifier traffic in /v1/stats.
+
+      - alert: RouterOverheadShareHigh
+        # What the routing-cost criterion actually means to a caller: the share of
+        # their wait that bought a routing decision rather than an answer. Works
+        # for every algorithm class, because it scales with the deployment's own
+        # model latency instead of an absolute millisecond bar. Both histograms
+        # record only runs that produced a successful routed call, so the
+        # populations line up.
+        #
+        # The count guard is load-bearing: a zero denominator makes the division
+        # +Inf, which clears any threshold and pages for a window that simply had
+        # no successful routed response to measure against.
+        expr: |
+          sum(rate(switchyard_routing_overhead_ms_sum[15m]))
+          / sum(rate(switchyard_total_latency_ms_sum[15m]))
+          > 0.5
+          and
+          sum(rate(switchyard_total_latency_ms_count[15m])) > 0
+        for: 15m
+        labels:
+          severity: warning
+          component: switchyard
+        annotations:
+          summary: "Switchyard routing overhead is over half of client-visible latency"
+          description: |
+            More than 50% of end-to-end latency on successful routed responses was
+            spent deciding where to send the request, sustained for 15 minutes.
+            Either the classifier got slower than the models it selects between, or
+            routing is burning time on failed attempts before it lands a target.
+            Compare the routing-overhead and model-call latency panels: if model
+            latency is flat while this climbs, the cost is in the router.
+
+      - alert: RouterErrorRateNotReducing
+        # Headline success criterion. The router should serve a lower
+        # rate of retryable errors than what raw upstream attempts
+        # would produce. If router_error_rate >= direct_error_rate the
+        # router is not adding the value it claims to.
+        #
+        # The volume floor keeps the comparison from turning on two or three
+        # responses; below it the two ratios are noise, not evidence.
+        expr: |
+          (
+            sum(rate(switchyard_client_responses_total{outcome="retryable_error"}[15m]))
+            / sum(rate(switchyard_client_responses_total[15m]))
+          )
+          >=
+          (
+            sum(rate(switchyard_upstream_attempts_total{outcome="retryable_error"}[15m]))
+            / sum(rate(switchyard_upstream_attempts_total[15m]))
+          )
+          and
+          sum(rate(switchyard_upstream_attempts_total{outcome="retryable_error"}[15m])) > 0
+          and
+          sum(increase(switchyard_client_responses_total[15m])) >= 10
+        for: 10m
+        labels:
+          severity: warning
+          component: switchyard
+        annotations:
+          summary: "Switchyard router is not reducing client-visible error rate"
+          description: |
+            Over the last 15 m, the rate of retryable_error responses to
+            clients is at least as high as the per-attempt upstream
+            retryable_error rate. The router is not absorbing failures
+            via retry — either retries are exhausting or every
+            endpoint is producing the same failure mode. Look at the
+            per-model breakdown of switchyard_errors_total{model}.

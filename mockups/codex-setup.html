@@ -1,0 +1,499 @@
+<title>Codex Setup Check</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #080a0a;
+    --win: #0e1211;
+    --panel: #121615;
+    --panel-2: #181d1b;
+    --line: rgba(224, 240, 232, 0.075);
+    --line-2: rgba(224, 240, 232, 0.15);
+    --ink: #e9f1ec;
+    --ink-2: #9dada6;
+    --ink-3: #6d7d76;
+    --accent: #4fc98a;
+    --accent-dim: #2fa96f;
+    --warn: #fab219;
+    --crit: #d03b3b;
+    --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 13px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+    padding: 24px 20px 40px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+  }
+
+  /* ---------- mock state switcher (page chrome, not part of the app) ---------- */
+
+  .switcher {
+    width: 100%;
+    max-width: 720px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-3);
+  }
+  .switcher .lb {
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    margin-right: 6px;
+  }
+  .switcher button {
+    font: inherit;
+    color: var(--ink-3);
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 2px 7px;
+    cursor: pointer;
+  }
+  .switcher button:hover { color: var(--ink-2); }
+  .switcher button[aria-pressed="true"] {
+    color: var(--accent);
+    border-color: rgba(79, 201, 138, 0.35);
+  }
+  .switcher button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  /* ---------- window ---------- */
+
+  .window {
+    width: 100%;
+    max-width: 720px;
+    background: var(--win);
+    border: 1px solid var(--line-2);
+    border-radius: 11px;
+    box-shadow: 0 24px 60px -18px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+  }
+
+  .titlebar {
+    height: 34px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #151a18, #101413);
+  }
+  .lights { display: flex; gap: 6px; }
+  .lights i { width: 10px; height: 10px; border-radius: 50%; }
+  .lights i:nth-child(1) { background: #e05c51; }
+  .lights i:nth-child(2) { background: #e0a63f; }
+  .lights i:nth-child(3) { background: #4fb555; }
+  .titlebar .name { font-size: 12px; font-weight: 500; color: var(--ink-2); }
+  .titlebar .name b { color: var(--ink); font-weight: 600; }
+
+  .steps {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--line);
+  }
+  .step { display: flex; align-items: center; gap: 7px; }
+  .step .n {
+    width: 18px;
+    height: 18px;
+    flex: none;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-family: var(--mono);
+    font-size: 10px;
+    background: rgba(224, 240, 232, 0.08);
+    color: var(--ink-3);
+  }
+  .step .t { font-size: 12px; color: var(--ink-3); }
+  .step.now .n { background: var(--accent-dim); color: #04140c; font-weight: 500; }
+  .step.now .t { color: var(--ink); font-weight: 500; }
+  .steps .bar { flex: 1; height: 1px; background: var(--line); min-width: 12px; }
+
+  /* ---------- content ---------- */
+
+  .content { padding: 16px 18px 18px; display: flex; flex-direction: column; gap: 14px; }
+
+  h1 { margin: 0; font-size: 19px; font-weight: 600; letter-spacing: -0.01em; }
+  .sub { margin: 4px 0 0; max-width: 64ch; font-size: 12.5px; color: var(--ink-2); }
+
+  h2 {
+    margin: 0 0 8px;
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  /* ---------- preflight checks ---------- */
+
+  .checks {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    overflow: hidden;
+  }
+  .check {
+    display: grid;
+    grid-template-columns: 16px 1fr auto;
+    align-items: start;
+    gap: 11px;
+    padding: 10px 13px;
+  }
+  .check + .check { border-top: 1px solid var(--line); }
+  .check .ico { margin-top: 1px; }
+  .check .ico svg { width: 14px; height: 14px; display: block; }
+  .check .lbl { font-size: 12.5px; font-weight: 500; }
+  .check .det { margin-top: 2px; font-size: 11px; color: var(--ink-3); max-width: 58ch; }
+  .check .det code {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--ink-2);
+  }
+  .check .val {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--ink-2);
+    padding-top: 1px;
+    white-space: nowrap;
+  }
+  .check.s-idle .lbl { color: var(--ink-3); }
+  .check.s-idle .val { color: #4e5854; }
+  .check.s-fail .det { color: var(--crit); }
+  .check.s-fail .val { color: var(--crit); }
+
+  .spin { animation: spin 1s linear infinite; transform-origin: 50% 50%; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ---------- privacy note + actions ---------- */
+
+  .note {
+    display: flex;
+    gap: 8px;
+    font-size: 11.5px;
+    color: var(--ink-3);
+    max-width: 70ch;
+  }
+  .note svg { width: 13px; height: 13px; flex: none; margin-top: 2px; }
+
+  .fix {
+    display: none;
+    gap: 11px;
+    grid-template-columns: 16px 1fr;
+    padding: 11px 13px;
+    border: 1px solid rgba(208, 59, 59, 0.35);
+    border-radius: 8px;
+    background: rgba(208, 59, 59, 0.07);
+  }
+  .fix.on { display: grid; }
+  .fix svg { width: 14px; height: 14px; margin-top: 2px; }
+  .fix .ttl { font-size: 12.5px; font-weight: 600; }
+  .fix .bd { margin-top: 3px; font-size: 11.5px; color: var(--ink-2); max-width: 62ch; }
+  .fix .bd code {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink);
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 1px 5px;
+  }
+
+  .actions { display: flex; align-items: center; gap: 10px; }
+  .btn {
+    font-family: var(--sans);
+    font-size: 12.5px;
+    padding: 5px 14px;
+    border-radius: 6px;
+    border: 1px solid var(--line-2);
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--ink);
+    cursor: pointer;
+  }
+  .btn:hover { background: rgba(255, 255, 255, 0.07); }
+  .btn.primary {
+    background: var(--accent-dim);
+    border-color: var(--accent-dim);
+    color: #04140c;
+    font-weight: 500;
+  }
+  .btn.primary:hover { background: var(--accent); border-color: var(--accent); }
+  .btn:disabled {
+    background: none;
+    border-color: var(--line);
+    color: #57635e;
+    cursor: not-allowed;
+  }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .path { font-family: var(--mono); font-size: 10px; color: var(--ink-3); }
+
+  /* ---------- footer ---------- */
+
+  .footer {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 11px 18px;
+    border-top: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.012);
+  }
+  .fstate { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--ink-2); }
+  .fstate svg { width: 13px; height: 13px; flex: none; }
+  .btns { margin-left: auto; display: flex; gap: 8px; }
+
+  .caption {
+    width: 100%;
+    max-width: 720px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-3);
+  }
+  .caption b { color: var(--ink-2); font-weight: 500; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .spin { animation: none; }
+  }
+</style>
+
+<div class="switcher" role="group" aria-label="Mock state">
+  <span class="lb">mock state</span>
+  <button type="button" data-state="checking">checking</button>
+  <button type="button" data-state="ready" aria-pressed="true">ready</button>
+  <button type="button" data-state="signin">not signed in</button>
+  <button type="button" data-state="noconfig">no config</button>
+</div>
+
+<div class="window" id="win">
+  <div class="titlebar">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <div class="name"><b>switchyard-desktop</b> — Setup</div>
+  </div>
+
+  <div class="steps">
+    <div class="step now"><span class="n">1</span><span class="t">Codex setup</span></div>
+    <span class="bar"></span>
+    <div class="step"><span class="n">2</span><span class="t">Models</span></div>
+    <span class="bar"></span>
+    <div class="step"><span class="n">3</span><span class="t">Routing roles</span></div>
+    <span class="bar"></span>
+    <div class="step"><span class="n">4</span><span class="t">Review</span></div>
+  </div>
+
+  <div class="content">
+    <div>
+      <h1>Check your Codex subscription</h1>
+      <p class="sub">switchyard-desktop reads your existing Codex setup and asks Codex which subscription models are available.</p>
+    </div>
+
+    <div>
+      <h2>Preflight</h2>
+      <div class="checks">
+        <div class="check s-ok" id="row-config">
+          <span class="ico"></span>
+          <div>
+            <div class="lbl">Codex configuration</div>
+            <div class="det"><code>model_provider = openai</code> · <code>model = gpt-6-astra</code></div>
+          </div>
+          <div class="val">read</div>
+        </div>
+
+        <div class="check s-ok" id="row-cli">
+          <span class="ico"></span>
+          <div>
+            <div class="lbl">Codex CLI</div>
+            <div class="det">Asks Codex for the model list your subscription can use.</div>
+          </div>
+          <div class="val">v0.48.1</div>
+        </div>
+
+        <div class="check s-ok" id="row-auth">
+          <span class="ico"></span>
+          <div>
+            <div class="lbl">Codex sign-in</div>
+            <div class="det">Requests go out through Codex's own authenticated session.</div>
+          </div>
+          <div class="val">active</div>
+        </div>
+
+        <div class="check s-ok" id="row-models">
+          <span class="ico"></span>
+          <div>
+            <div class="lbl">Subscription models</div>
+            <div class="det">gpt-6-astra is the model Codex uses today.</div>
+          </div>
+          <div class="val">5 found</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="fix" id="fix">
+      <svg viewBox="0 0 16 16" fill="none" stroke="var(--crit)" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="6.2"/><path d="M8 5v4M8 10.9v.3"/></svg>
+      <div>
+        <div class="ttl" id="fix-title">Title</div>
+        <div class="bd" id="fix-body">Body</div>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="btn" type="button" id="action">Refresh models</button>
+      <span class="path">read from ~/.codex/config.toml</span>
+    </div>
+
+    <p class="note">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 1.8l5 2v4.1c0 3-2.1 5.4-5 6.3-2.9-.9-5-3.3-5-6.3V3.8z"/><path d="M6 8l1.6 1.6L10.3 6.6"/></svg>
+      Only models reported by your active Codex subscription can be routed. switchyard-desktop does not accept API keys or manually entered model IDs, and it never reads credentials out of the Codex configuration.
+    </p>
+  </div>
+
+  <div class="footer">
+    <div class="fstate" id="fstate"></div>
+    <div class="btns">
+      <button class="btn" type="button" disabled>Back</button>
+      <button class="btn primary" type="button" id="next">Next</button>
+    </div>
+  </div>
+</div>
+
+<div class="caption">
+  <span><b>720 × 520</b> — step 1 of the setup wizard, four preflight checks in one panel</span>
+  <span><b>Mock state</b> switches the four blocking outcomes the spec requires; the app has no such control</span>
+  <span><b>Sample data</b> — paths, versions and model IDs are examples</span>
+</div>
+
+<script>
+  (function () {
+    var ICONS = {
+      ok: '<svg viewBox="0 0 16 16" fill="none" stroke="var(--accent)" stroke-width="1.7" stroke-linecap="round"><path d="M2.8 8.4l3.4 3.4L13.2 4.8"/></svg>',
+      fail: '<svg viewBox="0 0 16 16" fill="none" stroke="var(--crit)" stroke-width="1.7" stroke-linecap="round"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>',
+      idle: '<svg viewBox="0 0 16 16" fill="none" stroke="#4e5854" stroke-width="1.7" stroke-linecap="round"><path d="M4 8h8"/></svg>',
+      spin: '<svg viewBox="0 0 16 16" fill="none" stroke="var(--ink-3)" stroke-width="1.7" stroke-linecap="round"><circle cx="8" cy="8" r="5.6" stroke-dasharray="26 9" class="spin"/></svg>'
+    };
+
+    var CONFIG_OK = "<code>model_provider = openai</code> · <code>model = gpt-6-astra</code>";
+    var NOT_CHECKED = "Not checked — the earlier step has to pass first.";
+
+    var STATES = {
+      checking: {
+        rows: {
+          config: ["spin", "Reading the local Codex configuration.", "reading…"],
+          cli: ["idle", NOT_CHECKED, "—"],
+          auth: ["idle", NOT_CHECKED, "—"],
+          models: ["idle", NOT_CHECKED, "—"]
+        },
+        action: ["Checking Codex…", true],
+        foot: ["spin", "Checking the configured Codex subscription…"],
+        next: false,
+        fix: null
+      },
+      ready: {
+        rows: {
+          config: ["ok", CONFIG_OK, "read"],
+          cli: ["ok", "Asks Codex for the model list your subscription can use.", "v0.48.1"],
+          auth: ["ok", "Requests go out through Codex's own authenticated session.", "active"],
+          models: ["ok", "gpt-6-astra is the model Codex uses today.", "5 found"]
+        },
+        action: ["Refresh models", false],
+        foot: ["ok", "5 subscription models found."],
+        next: true,
+        fix: null
+      },
+      signin: {
+        rows: {
+          config: ["ok", CONFIG_OK, "read"],
+          cli: ["ok", "Asks Codex for the model list your subscription can use.", "v0.48.1"],
+          auth: ["fail", "Sign in to Codex, then try discovering models again.", "signed out"],
+          models: ["idle", NOT_CHECKED, "—"]
+        },
+        action: ["Try again", false],
+        foot: ["fail", "Sign in to Codex, then try discovering models again."],
+        next: false,
+        fix: [
+          "Sign in to Codex",
+          "Run <code>codex login</code> in Terminal, or open Codex and sign in there. " +
+            "switchyard-desktop uses that session directly and never stores your credentials."
+        ]
+      },
+      noconfig: {
+        rows: {
+          config: ["fail", "Codex must be configured before switchyard-desktop can continue.", "not found"],
+          cli: ["idle", NOT_CHECKED, "—"],
+          auth: ["idle", NOT_CHECKED, "—"],
+          models: ["idle", NOT_CHECKED, "—"]
+        },
+        action: ["Try again", false],
+        foot: ["fail", "Codex must be configured before switchyard-desktop can continue."],
+        next: false,
+        fix: [
+          "Configure Codex first",
+          "Install Codex and run it once so it writes <code>~/.codex/config.toml</code>. " +
+            "switchyard-desktop reads that file — it does not create or change it during setup."
+        ]
+      }
+    };
+
+    var action = document.getElementById("action");
+    var next = document.getElementById("next");
+    var fstate = document.getElementById("fstate");
+    var fix = document.getElementById("fix");
+    var fixTitle = document.getElementById("fix-title");
+    var fixBody = document.getElementById("fix-body");
+
+    function apply(name) {
+      var state = STATES[name];
+
+      Object.keys(state.rows).forEach(function (key) {
+        var spec = state.rows[key];
+        var row = document.getElementById("row-" + key);
+        row.className = "check s-" + (spec[0] === "spin" ? "idle" : spec[0]);
+        row.querySelector(".ico").innerHTML = ICONS[spec[0]];
+        row.querySelector(".det").innerHTML = spec[1];
+        row.querySelector(".val").textContent = spec[2];
+      });
+
+      action.textContent = state.action[0];
+      action.disabled = state.action[1];
+      next.disabled = !state.next;
+
+      fstate.innerHTML = ICONS[state.foot[0]] + "<span>" + state.foot[1] + "</span>";
+      fstate.style.color = state.foot[0] === "fail" ? "var(--crit)" : "var(--ink-2)";
+
+      if (state.fix) {
+        fixTitle.textContent = state.fix[0];
+        fixBody.innerHTML = state.fix[1];
+        fix.classList.add("on");
+      } else {
+        fix.classList.remove("on");
+      }
+
+      document.querySelectorAll(".switcher button").forEach(function (button) {
+        if (button.dataset.state === name) {
+          button.setAttribute("aria-pressed", "true");
+        } else {
+          button.removeAttribute("aria-pressed");
+        }
+      });
+    }
+
+    document.querySelectorAll(".switcher button").forEach(function (button) {
+      button.addEventListener("click", function () { apply(button.dataset.state); });
+    });
+
+    apply("ready");
+  })();
+</script>
