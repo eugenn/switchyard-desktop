@@ -11,13 +11,24 @@ with or endorsed by NVIDIA or OpenAI.
 
 ![Statistics screen](images/ui.png)
 
+## Download
+
+[Download the DMG for Apple Silicon (arm64)](https://github.com/eugenn/switchyard-desktop/releases/download/v0.1.0-preview.1/switchyard-desktop-0.1.0-1-arm64-local.dmg)
+— macOS 14 or later.
+
+This is the **v0.1.0-preview.1 test prerelease**, ad-hoc signed without an Apple
+Developer ID signature or Apple notarization. An Intel DMG is not available for
+this preview. See the [release notes and known limitations](https://github.com/eugenn/switchyard-desktop/releases/tag/v0.1.0-preview.1)
+and the [SHA-256 checksum](https://github.com/eugenn/switchyard-desktop/releases/download/v0.1.0-preview.1/switchyard-desktop-0.1.0-1-arm64-local.dmg.sha256).
+
 ## Quick start
 
 Requires macOS 14 or later and the Codex CLI installed and signed in with access
 to the models you want to use.
 
-1. Open the DMG for your Mac (`arm64` or `x86_64`), drag **switchyard-desktop.app**
-   to **Applications**, and launch it.
+1. Download and open the DMG above, drag **switchyard-desktop.app** to
+   **Applications**, and launch it. If macOS blocks the preview, follow
+   [Opening the unnotarized preview](#opening-the-unnotarized-preview) below.
 2. Open **Routing config**. In **Codex account**, discover your available models.
 3. In **Routing**, choose an algorithm and assign models and roles.
 4. In **Review & start**, review the configuration and start routing. Follow the
@@ -29,6 +40,26 @@ to the models you want to use.
    ```
 
 Keep the app running while using the route. Use **Stop routing** when finished.
+
+### Opening the unnotarized preview
+
+Only approve the app if you trust this project and downloaded it from this
+repository's GitHub Releases. Apple has not notarized this test build.
+
+1. In **Applications**, try opening **switchyard-desktop.app** once. If macOS
+   says the developer cannot be verified or Apple cannot check the app for
+   malicious software, dismiss the alert without moving the app to Trash.
+2. Open **System Settings → Privacy & Security** and scroll to **Security**.
+3. Find the message about **switchyard-desktop** and click **Open Anyway**.
+4. Confirm with **Open** when prompted. Subsequent launches normally work by
+   double-clicking the app.
+
+This adds an exception for this app. There is no need to disable Gatekeeper
+globally or run Terminal commands. If macOS instead reports malware or a damaged
+app, stop rather than bypassing that warning. On a managed Mac, your
+administrator may restrict these options.
+
+See Apple's [instructions for opening apps that haven't been notarized](https://support.apple.com/en-us/102445).
 
 ## Run from source
 
