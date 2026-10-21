@@ -352,29 +352,55 @@ private func assignAllTiers(_ model: WizardModel) {
     #expect(model.configPreview.contains("llm_classifier"))
 }
 
+private struct MissingBinaryProcessInspector: ProcessInspecting {
+    func isAlive(_ pid: Int32) -> Bool { false }
+    func executablePath(of pid: Int32) -> String? { nil }
+    func listeningPIDs(port: Int) -> [Int32] { [] }
+    func terminate(_ pid: Int32) {}
+    func forceKill(_ pid: Int32) {}
+}
+
 @MainActor
-@Test func applyWithoutABinaryReportsInstallInstructions() async {
+@Test func applyWithoutABinaryReportsInstallInstructions() async throws {
+    let directory = UserDataLocations.testSandbox.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
     let model = WizardModel(
-        codexConfigPath: sampleSetup.configPath,
+        processManager: SwitchyardProcessManager(
+            registry: ManagedProcessRegistry(fileURL: directory.appendingPathComponent("processes.json")),
+            reclaimer: LeftoverProcessReclaimer(inspector: MissingBinaryProcessInspector())
+        ),
+        readinessChecker: RoutingReadinessChecker(
+            liteLLMAvailable: { true }, binaryLocator: { _ in nil }, portHolder: { _ in nil }
+        ),
+        routingConfigPath: directory.appendingPathComponent("routes.toml"),
+        codexConfigPath: directory.appendingPathComponent("config.toml"),
+        codexProfilePath: directory.appendingPathComponent("profile.toml"),
+        sessionStore: ActiveRoutingSessionStore(fileURL: directory.appendingPathComponent("session.json")),
+        savedSetupStore: SavedRoutingSetupStore(fileURL: directory.appendingPathComponent("setup.json")),
+        roleLibraryStore: RoleLibraryStore(fileURL: directory.appendingPathComponent("roles.json")),
+        preferencesStore: AppPreferencesStore(fileURL: directory.appendingPathComponent("preferences.json")),
         setupReader: StubSetupReader(output: .setup(sampleSetup)),
-        modelDiscovery: StubModelDiscovery(output: .models(twoDiscoveredModels))
+        modelDiscovery: StubModelDiscovery(output: .models(twoDiscoveredModels)),
+        cliVersionProbe: { nil },
+        restoreSavedSetup: false
     )
     model.selectRoutingAlgorithm(.stageRouter)
     assignAllTiers(model)
     model.profile.tiers[0].modelID = oneDiscoveredModel[0].id
     model.profile.tiers[1].modelID = twoDiscoveredModels[0].id
     await model.refreshSubscriptionModels()
-    // Force resolution to fail regardless of what this machine has installed.
-    model.binaryPathOverride = "/nonexistent/switchyard-server"
-
-    guard model.resolvedBinary == nil else { return }  // dev machine has a real binary on PATH
-
+    // The injected locator fails even when a developer has already built the core.
     await model.apply()
     guard case .failed(let message) = model.applyState else {
         Issue.record("expected apply to fail without a binary")
         return
     }
-    #expect(message.contains("cargo install"))
+    #expect(model.readiness.resolvedBinaryPath == nil)
+    #expect(message.contains("Reinstall switchyard-desktop from its DMG"))
+    #expect(message.contains("scripts/build-switchyard.sh"))
+    #expect(!FileManager.default.fileExists(atPath: model.routingConfigPath.path))
+    #expect(!FileManager.default.fileExists(atPath: model.codexProfilePath.path))
 }
 
 /// A stand-in server that ignores its arguments and stays alive, so the model
