@@ -8,5 +8,6 @@ dist/
 .cadence/
 .code-review-graph/
 .claude/
+/.github/
 __pycache__/
 *.pyc

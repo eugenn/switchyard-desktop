@@ -1,9 +1,0 @@
-version: 2
-updates:
-  - package-ecosystem: github-actions
-    directory: /
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
-# Core dependencies are maintained in the core fork. Python pins are updated
-# deliberately with runtime and bundle validation; do not update vendor here.
