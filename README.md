@@ -1,8 +1,10 @@
 # switchyard-desktop
 
-Native macOS app for routing Codex requests between models with NVIDIA Switchyard.
-Configure models and routing, then review request statistics. Switchyard and the
-Python/LiteLLM runtime are bundled with the app.
+Native macOS app for routing AI requests between models with NVIDIA Switchyard.
+The project's scope covers all providers supported by Switchyard. Codex is one
+example of a client integration, rather than a requirement of the underlying
+router. Configure models and routing, then review request statistics. Switchyard
+and the Python/LiteLLM runtime are bundled with the app.
 
 This is an independent community project using a
 [maintained Switchyard fork](https://github.com/eugenn/Switchyard), based on
@@ -14,6 +16,7 @@ with or endorsed by NVIDIA or OpenAI.
 ## Download
 
 [Download the DMG for Apple Silicon (arm64)](https://github.com/eugenn/switchyard-desktop/releases/download/v0.1.0-preview.1/switchyard-desktop-0.1.0-1-arm64-local.dmg)
+[![DMG downloads](https://img.shields.io/github/downloads/eugenn/switchyard-desktop/v0.1.0-preview.1/switchyard-desktop-0.1.0-1-arm64-local.dmg?label=DMG%20downloads&displayAssetName=false&color=blue)](https://github.com/eugenn/switchyard-desktop/releases/tag/v0.1.0-preview.1)
 — macOS 14 or later.
 
 This is the **v0.1.0-preview.1 test prerelease**, ad-hoc signed without an Apple
@@ -21,19 +24,37 @@ Developer ID signature or Apple notarization. An Intel DMG is not available for
 this preview. See the [release notes and known limitations](https://github.com/eugenn/switchyard-desktop/releases/tag/v0.1.0-preview.1)
 and the [SHA-256 checksum](https://github.com/eugenn/switchyard-desktop/releases/download/v0.1.0-preview.1/switchyard-desktop-0.1.0-1-arm64-local.dmg.sha256).
 
-## Quick start
+## Providers and clients
 
-Requires macOS 14 or later and the Codex CLI installed and signed in with access
-to the models you want to use.
+Switchyard connects routes to upstream model providers; applications such as
+Codex send requests to those routes. Provider credentials, available models, and
+API compatibility depend on the chosen upstream and client. See the
+[bundled Switchyard documentation](vendor/switchyard/README.md) for the core's
+capabilities and configuration.
+
+**Current preview limitation:** the desktop setup wizard currently configures
+the Codex/ChatGPT integration. Anthropic Claude and Google Gemini are not yet
+selectable in the wizard. Switchyard's broader provider support does not mean
+every provider already has a setup flow in this preview.
+
+## Install and launch
 
 1. Download and open the DMG above, drag **switchyard-desktop.app** to
    **Applications**, and launch it. If macOS blocks the preview, follow
    [Opening the unnotarized preview](#opening-the-unnotarized-preview) below.
-2. Open **Routing config**. In **Codex account**, discover your available models.
-3. In **Routing**, choose an algorithm and assign models and roles.
-4. In **Review & start**, review the configuration and start routing. Follow the
+2. Open **Routing config** to configure a route. The example below walks through
+   the integration available in the current preview.
+
+### Example: route Codex requests
+
+For this example, install the Codex CLI and sign in with access to the models
+you want to use. These requirements apply to this integration.
+
+1. In **Codex account**, discover your available models.
+2. In **Routing**, choose an algorithm and assign models and roles.
+3. In **Review & start**, review the configuration and start routing. Follow the
    ChatGPT sign-in instructions if prompted.
-5. Run Codex through the route:
+4. Run Codex through the route:
 
    ```sh
    codex --profile switch
