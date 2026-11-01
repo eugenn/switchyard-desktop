@@ -15,14 +15,14 @@ with or endorsed by NVIDIA or OpenAI.
 
 ## Download
 
-[Download the DMG for Apple Silicon (arm64)](https://github.com/eugenn/switchyard-desktop/releases/download/v0.1.0-preview.1/switchyard-desktop-0.1.0-1-arm64-local.dmg)
-[![DMG downloads](https://img.shields.io/github/downloads/eugenn/switchyard-desktop/v0.1.0-preview.1/switchyard-desktop-0.1.0-1-arm64-local.dmg?label=DMG%20downloads&displayAssetName=false&color=blue)](https://github.com/eugenn/switchyard-desktop/releases/tag/v0.1.0-preview.1)
+[Download the DMG for Apple Silicon (arm64)](https://github.com/eugenn/switchyard-desktop/releases/download/v0.1.0-preview.2/switchyard-desktop-0.1.0-2-arm64-local.dmg)
+[![DMG downloads](https://img.shields.io/github/downloads/eugenn/switchyard-desktop/v0.1.0-preview.2/switchyard-desktop-0.1.0-2-arm64-local.dmg?label=DMG%20downloads&displayAssetName=false&color=blue)](https://github.com/eugenn/switchyard-desktop/releases/tag/v0.1.0-preview.2)
 — macOS 14 or later.
 
-This is the **v0.1.0-preview.1 test prerelease**, ad-hoc signed without an Apple
+This is the **v0.1.0-preview.2 test prerelease**, ad-hoc signed without an Apple
 Developer ID signature or Apple notarization. An Intel DMG is not available for
-this preview. See the [release notes and known limitations](https://github.com/eugenn/switchyard-desktop/releases/tag/v0.1.0-preview.1)
-and the [SHA-256 checksum](https://github.com/eugenn/switchyard-desktop/releases/download/v0.1.0-preview.1/switchyard-desktop-0.1.0-1-arm64-local.dmg.sha256).
+this preview. See the [release notes and known limitations](https://github.com/eugenn/switchyard-desktop/releases/tag/v0.1.0-preview.2)
+and the [SHA-256 checksum](https://github.com/eugenn/switchyard-desktop/releases/download/v0.1.0-preview.2/switchyard-desktop-0.1.0-2-arm64-local.dmg.sha256).
 
 ## Providers and clients
 

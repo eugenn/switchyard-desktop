@@ -45,7 +45,7 @@ package struct SavedRoutingSetup: Codable, Equatable, Sendable {
 
         let targetNames: [String]
         switch algorithm {
-        case .stageRouter, .auto, .capability, .escalation, .composite, .planExecute:
+        case .stageRouter, .auto, .capability, .escalation, .composite, .planExecute, .vgr:
             guard let efficient = route.efficient_target ?? route.weak_target ?? route.stage?.efficient_target,
                   let capable = route.capable_target ?? route.strong_target ?? route.stage?.capable_target else {
                 throw MigrationFailure.incompleteRoute
@@ -115,7 +115,7 @@ package struct SavedRoutingSetup: Codable, Equatable, Sendable {
             upstreamBaseURL: client.base_url
         )
         let judgeName = route.classifier_target ?? route.models?[Self.judgeGroup]?.first
-            ?? route.classifier?.target ?? route.advisor_target
+            ?? route.classifier?.target ?? route.advisor_target ?? route.judge_target
             ?? route.subagents?.models?[Self.judgeGroup]?.first
         profile.classifierTargetID = targetID(named: judgeName, in: targetNames, tiers: tiers)
         if profile.classifierTargetID == nil, let judgeName, let judge = document.targets[judgeName] {
@@ -318,6 +318,7 @@ package struct SavedRoutingSetup: Codable, Equatable, Sendable {
         package let targets: [String]?
         package let models: [String: [String]]?
         package let classifier_target: String?
+        package let judge_target: String?
         package let default_target: String?
         package let vision: Bool?
         package let reasoning_summaries: Bool?

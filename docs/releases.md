@@ -32,7 +32,8 @@ filters or Git archive attributes cannot silently change its contents.
 
 `--allow-dirty` is for local development. Its flag stays true until a new clean
 import; committing desktop alone cannot make a dirty core snapshot releasable.
-The current imported snapshot is intentionally dirty and cannot be released.
+The current imported snapshot contains committed core sources without tracked
+working-tree changes. Verify the published commit before packaging a release.
 
 ```sh
 # Offline integrity check; development snapshots are allowed.

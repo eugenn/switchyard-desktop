@@ -15,6 +15,7 @@ package enum RoutingAlgorithm: String, CaseIterable, Codable, Equatable, Sendabl
     case noop
     case prefillRouter = "prefill_router"
     case planExecute = "plan_execute"
+    case vgr
 
     package var id: String { rawValue }
     package var serverType: String {
@@ -37,6 +38,7 @@ package enum RoutingAlgorithm: String, CaseIterable, Codable, Equatable, Sendabl
         case .noop: "No-op"
         case .prefillRouter: "Prefill router (optional build)"
         case .planExecute: "Plan → execute"
+        case .vgr: "Verification-gated routing"
         }
     }
     package var summary: String {
@@ -53,13 +55,14 @@ package enum RoutingAlgorithm: String, CaseIterable, Codable, Equatable, Sendabl
         case .noop: "Returns OK without calling a model."
         case .prefillRouter: "Requires a server built with prefill-router, its Python dependencies and a trained checkpoint."
         case .planExecute: "Plans on Capable, then permanently hands off to Efficient after the first edit or write."
+        case .vgr: "Verifies Efficient’s candidate answers. Starts in shadow mode, which serves Capable while measuring routing decisions."
         }
     }
     package var requiresJudge: Bool {
         [.capability, .llmClassifier, .escalation, .composite, .advisor].contains(self)
     }
     package var hasTierPair: Bool {
-        [.auto, .stageRouter, .capability, .escalation, .composite, .planExecute].contains(self)
+        [.auto, .stageRouter, .capability, .escalation, .composite, .planExecute, .vgr].contains(self)
     }
     package var hasVariableTargets: Bool {
         [.llmClassifier, .random, .prefillRouter].contains(self)

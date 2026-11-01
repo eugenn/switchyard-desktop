@@ -13,15 +13,14 @@ Periodically merge upstream into the maintained core branch, resolve conflicts
 there and run the affected crate tests. Preserve published commits and release
 tags; do not rebase history already referenced by desktop releases.
 
-The current snapshot includes custom routing work and local changes in
-`crates/libsy-llm-client/README.md`, `crates/libsy-llm-client/src/client.rs` and
-`crates/switchyard-server/src/routing_log.rs`. The uncommitted client work includes
-LiteLLM session headers; the routing-log work includes agent identity. This list
-describes the remaining working-tree changes, not the full fork/upstream diff.
-Use the manifest's `upstream_commit` and `commit` to inspect committed differences
-in the core checkout, and its file hashes to identify the imported working tree.
+The current snapshot imports maintained fork commit
+`b2ab2ed72f3388fc9946f315e32e934737cc46a1` without tracked working-tree changes.
+It includes the fork's routing work, LiteLLM session headers, agent identity in
+routing logs, and the latest integrated upstream changes. Use the manifest's
+`upstream_commit` and `commit` to inspect committed differences in the core
+checkout, and its file hashes to verify the imported sources.
 
 Before the first clean public core release, review the complete upstream diff,
 document the supported differences in the fork, and ensure changed upstream
-files carry the required change notices. Desktop development can continue while
-the snapshot is dirty; public desktop releases are blocked until a clean import.
+files carry the required change notices. Public desktop releases require a clean
+import whose recorded commit is published in the maintained fork.

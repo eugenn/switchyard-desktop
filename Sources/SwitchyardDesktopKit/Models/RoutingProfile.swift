@@ -241,7 +241,7 @@ package struct RoutingProfile: Codable, Equatable, Sendable {
 
     package static func defaultTargets(for algorithm: RoutingAlgorithm?) -> [TaskTier] {
         switch algorithm {
-        case .auto, .stageRouter, .capability, .escalation, .composite, .planExecute:
+        case .auto, .stageRouter, .capability, .escalation, .composite, .planExecute, .vgr:
             TaskTier.stageRouterDefaults
         case .llmClassifier, .random, .prefillRouter:
             TaskTier.classifierDefaults
@@ -281,7 +281,7 @@ package struct RoutingProfile: Codable, Equatable, Sendable {
             return tiers.compactMap(\.targetKey)
         }
         switch algorithm {
-        case .auto, .stageRouter, .capability, .escalation, .composite, .planExecute:
+        case .auto, .stageRouter, .capability, .escalation, .composite, .planExecute, .vgr:
             return ["efficient", "capable"]
         case nil:
             return []
@@ -537,7 +537,7 @@ package struct RoutingProfile: Codable, Equatable, Sendable {
 
         var errors: [String] = []
         switch algorithm {
-        case .auto, .stageRouter, .capability, .escalation, .composite, .planExecute:
+        case .auto, .stageRouter, .capability, .escalation, .composite, .planExecute, .vgr:
             if tiers.count != 2 {
                 errors.append("Stage routing requires exactly Efficient and Capable roles.")
             } else if tiers.map(\.displayName) != ["Efficient", "Capable"] {
@@ -561,6 +561,10 @@ package struct RoutingProfile: Codable, Equatable, Sendable {
             errors.append(
                 "Choose which model decides the routing — a target's model, or one of its own."
             )
+        }
+        if algorithm == .vgr, tiers.count == 2,
+           let efficient = tiers[0].assignedModel, efficient == tiers[1].assignedModel {
+            errors.append("Verification-gated routing requires distinct Efficient and Capable models.")
         }
         if Set(allTargetNames).count != allTargetNames.count {
             errors.append("Native target keys must be unique.")

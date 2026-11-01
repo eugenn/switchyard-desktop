@@ -13,6 +13,8 @@ from switchyard_rust._native import load_native
 _EXPORTS = frozenset(
     {
         "Algorithm",
+        "AlgorithmFactory",
+        "ConfiguredAlgorithm",
         "ContextWindowExceededError",
         "CustomClassifierConfig",
         "DecisionCall",
@@ -36,7 +38,7 @@ _EXPORTS = frozenset(
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Sequence
+    from collections.abc import AsyncIterator, Awaitable, Sequence
     from typing import ClassVar, Literal, final
 
     class LibsyError(RuntimeError): ...
@@ -130,9 +132,9 @@ if TYPE_CHECKING:
         @property
         def models(self) -> list[str]: ...
 
-        def respond(self, response: LlmResponse.Agg | LlmResponse.Stream) -> None: ...
+        async def respond(self, work: Awaitable[LlmResponse.Agg | LlmResponse.Stream]) -> None: ...
 
-        def fail(self, error: BaseException) -> None: ...
+        async def fail(self, error: BaseException) -> None: ...
 
     @final
     class DecisionCall:
@@ -145,9 +147,9 @@ if TYPE_CHECKING:
         @property
         def model(self) -> str: ...
 
-        def respond(self, response: Mapping[str, object]) -> None: ...
+        async def respond(self, work: Awaitable[Mapping[str, object]]) -> None: ...
 
-        def fail(self, error: BaseException) -> None: ...
+        async def fail(self, error: BaseException) -> None: ...
 
     @final
     class OutcomeMetadata:
@@ -172,6 +174,12 @@ if TYPE_CHECKING:
 
         @property
         def request(self) -> dict[str, object]: ...
+
+        @property
+        def fallback_request(self) -> dict[str, object] | None: ...
+
+        @property
+        def candidate_requests(self) -> dict[str, dict[str, object]]: ...
 
         @property
         def response(self) -> LlmResponse.Agg | LlmResponse.Stream | None: ...
@@ -207,8 +215,9 @@ if TYPE_CHECKING:
             candidates: Mapping[str, str],
             evidence: object,
             instructions: object | None = None,
+            criteria: Mapping[str, object] | None = None,
         ) -> TaskClassifierConfig:
-            """Use relative advantage with the default routing and fallback settings."""
+            """Apply a cutoff to relative advantage or a custom candidate choice score."""
             ...
 
         def __init__(
@@ -279,6 +288,32 @@ if TYPE_CHECKING:
             subagent_models: Mapping[str, Sequence[str]] | None = None,
             headers: Mapping[str, str] | None = None,
         ) -> AsyncIterator[Step.CallModel | Step.CallDecision | Step.Done]: ...
+
+    @final
+    class AlgorithmFactory:
+        """Build deployment algorithms without provider clients or credential access."""
+
+        @staticmethod
+        def from_toml(source: str) -> AlgorithmFactory:
+            """Parse a full deployment, raising ValueError for invalid configuration."""
+            ...
+
+        def build(self) -> dict[str, ConfiguredAlgorithm]:
+            """Build independent handles keyed by the public route IDs."""
+            ...
+
+    @final
+    class ConfiguredAlgorithm:
+        """An algorithm and model groups; the host applies target prompts and provider settings."""
+
+        def run_stream(
+            self,
+            request: Mapping[str, object],
+            *,
+            headers: Mapping[str, str] | None = None,
+        ) -> AsyncIterator[Step.CallModel | Step.CallDecision | Step.Done]:
+            """Yield host calls and an outcome without carrying libsy's per-run State forward."""
+            ...
 
     def noop() -> Algorithm: ...
 

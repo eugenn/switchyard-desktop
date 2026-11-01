@@ -219,8 +219,9 @@ def exercise(binary, directory):
                 [{'decision': {'target': name}} for name in ['direct', 'standard', 'direct']], calls,
                 wire=wire))
         for name in ('stage_router', 'auto'):
-            results.append(run_case(binary, directory, name, [opening, fatal, recovered],
-                                    ['model-0', 'model-1', 'model-0'], wire=wire))
+            # Escalation holds Capable for two more requests, even after recovery.
+            results.append(run_case(binary, directory, name, [opening, fatal] + [recovered] * 3,
+                                    ['model-0', 'model-1', 'model-1', 'model-1', 'model-0'], wire=wire))
             results.append(run_case(binary, directory, name, [opening, retrieved, executed_failure],
                                     ['model-0', 'model-0', 'model-1'], wire=wire))
         for name, mutation in [('plan_execute', 'apply_patch'),
@@ -231,8 +232,8 @@ def exercise(binary, directory):
         results.append(run_case(binary, directory, 'capability', [opening, continuation, followup],
             ['model-0', 'model-1', 'model-0'], [forecast(.95), forecast(.05), forecast(.95)], 3,
             'capability-classifier/prompt.md', wire))
-        results.append(run_case(binary, directory, 'composite', [opening, fatal, recovered, followup],
-            ['model-0', 'model-1', 'model-0', 'model-1'], [forecast(.95), forecast(.05)], 2,
+        results.append(run_case(binary, directory, 'composite', [opening, fatal] + [recovered] * 3 + [followup],
+            ['model-0', 'model-1', 'model-1', 'model-1', 'model-0', 'model-1'], [forecast(.95), forecast(.05)], 2,
             'capability-classifier/prompt.md', wire))
         results.append(run_case(binary, directory, 'escalation', [opening, continuation, followup],
             ['model-0', 'model-1', 'model-1'],
@@ -249,6 +250,9 @@ def exercise(binary, directory):
             'advisor-gate/reviewer-system-prompt.md', wire))
         results.append(run_case(binary, directory, 'passthrough', [opening, continuation],
                                 ['model-0', 'model-0'], wire=wire))
+        # The app's VGR preset measures candidates but serves Capable in shadow mode.
+        results.append(run_case(binary, directory, 'vgr', [opening, continuation],
+                                ['model-1', 'model-1'], wire=wire))
     for trigger in ('user_turn', 'new_session'):
         results.append(run_case(binary, directory, f'custom-{trigger}', [opening, continuation],
             ['model-0', 'model-1'], [{'decision': {'target': 'direct'}},
@@ -259,8 +263,8 @@ def exercise(binary, directory):
         ['model-0', 'model-1'], [forecast(.95)], 1, 'capability-classifier/prompt.md'))
     results.append(run_case(binary, directory, 'stage-subagents', [opening], ['model-0']))
     results.append(run_case(binary, directory, 'stage-subagents', [opening], ['worker-model'], subagent=True))
-    results.append(run_case(binary, directory, 'stage-target-prompts', [opening, fatal, recovered],
-                            ['model-0', 'model-1', 'model-0']))
+    results.append(run_case(binary, directory, 'stage-target-prompts', [opening, fatal] + [recovered] * 3,
+                            ['model-0', 'model-1', 'model-1', 'model-1', 'model-0']))
     # Seed and weights exercise the actual random route, without probabilistic assertions.
     random_path = directory / 'random.toml'
     random_path.write_text(random_path.read_text() + '\nweights = [0.0, 1.0]\nseed = 7\n')

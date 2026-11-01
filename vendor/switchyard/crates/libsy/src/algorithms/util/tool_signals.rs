@@ -14,13 +14,16 @@
 
 use std::collections::HashSet;
 use std::path::Path;
+use std::sync::LazyLock;
 
 use async_trait::async_trait;
+use regex::Regex;
 use serde::Deserialize;
 use serde_json::Value;
 use switchyard_protocol::codex_namespaces::{split_qualified_name, tool_namespaces};
 use switchyard_protocol::{ContentBlock, Request, Role, WireFormat};
 
+use super::affinity::is_user_turn;
 use crate::{LibsyError, Result};
 
 use crate::core::processor::{Event, Processor};
@@ -419,6 +422,7 @@ impl ToolSignals {
             request,
             window_size.unwrap_or(DEFAULT_RECENT_WINDOW),
             semantics,
+            false,
         )
     }
 }
@@ -432,6 +436,7 @@ struct ObservedToolCall<'a> {
     bare_name: Option<&'a str>,
     command: Option<String>,
     is_retrieval: bool,
+    code_semantic: Option<ToolSemantic>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -470,8 +475,19 @@ impl Default for ToolSignalProcessor {
     }
 }
 
+impl ToolSignalProcessor {
+    pub(crate) fn for_user_turn(&self, request: &Request) -> ToolSignals {
+        extract_tool_signals_with_window_and_semantics(
+            request,
+            self.recent_window,
+            &self.tool_semantics,
+            true,
+        )
+    }
+}
+
 #[async_trait]
-impl Processor<State> for ToolSignalProcessor {
+impl Processor for ToolSignalProcessor {
     async fn process(&self, state: &mut State, event: Event<'_>) -> Result<()> {
         if let Event::Request { request: req, .. } = event {
             let tool_signal = ToolSignals::from_request_with_semantics(
@@ -487,6 +503,42 @@ impl Processor<State> for ToolSignalProcessor {
 
 fn classify_tool_call(name: &str, command: Option<&str>) -> ToolSemantic {
     classify_tool_call_with_semantics(name, command, &ToolSemantics::default())
+}
+
+/// Recognize straight-line Codex patch calls, with optional literal bindings and
+/// `text(...)` wrappers. Other JavaScript stays unknown, including control flow.
+fn code_mode_has_patch(mut input: &str) -> bool {
+    static STATEMENT: LazyLock<Regex> = LazyLock::new(|| {
+        let identifier = r"[a-zA-Z_$][a-zA-Z0-9_$]*";
+        let literal = r#"(?:"(?:[^"\\\r\n]|\\[^\r\n])*"|'(?:[^'\\\r\n]|\\[^\r\n])*'|`(?:[^`\\$]|\\[^\r\n])*`)"#;
+        let argument = format!(r"(?:{literal}|{identifier})");
+        let patch = format!(r"await\s+tools\s*\.\s*apply_patch\s*\(\s*{argument}\s*\)");
+        // The pattern uses only constant fragments.
+        Regex::new(&format!(
+            r"(?x)\A(?://[^\r\n]*|(?s:/\*.*?\*/)|(?:
+                (?:const|let)\s+(?P<binding>{identifier})\s*=\s*{literal}|
+                (?P<patch>{patch}|text\s*\(\s*{patch}\s*\))|
+                text\s*\(\s*{argument}\s*\)
+            )[\t\x20]*(?:;|\r?\n|\z))"
+        ))
+        .expect("constant code-mode statement pattern")
+    });
+    let mut has_patch = false;
+    while !input.trim_start().is_empty() {
+        input = input.trim_start();
+        let Some(statement) = STATEMENT.captures(input) else {
+            return false;
+        };
+        if statement
+            .name("binding")
+            .is_some_and(|binding| matches!(binding.as_str(), "tools" | "text"))
+        {
+            return false;
+        }
+        has_patch |= statement.name("patch").is_some();
+        input = &input[statement[0].len()..];
+    }
+    has_patch
 }
 
 fn classify_tool_call_with_semantics(
@@ -993,6 +1045,7 @@ fn extract_tool_signals_with_window(request: &Request, recent_window: usize) -> 
         request,
         recent_window,
         &ToolSemantics::default(),
+        false,
     )
 }
 
@@ -1000,9 +1053,16 @@ fn extract_tool_signals_with_window_and_semantics(
     request: &Request,
     recent_window: usize,
     semantics: &ToolSemantics,
+    current_user_turn: bool,
 ) -> ToolSignals {
     // Read the decoded conversation, including preserved built-in tool outputs.
     let messages = &request.llm_request.messages;
+    let boundary = if current_user_turn {
+        messages.iter().rposition(is_user_turn)
+    } else {
+        None
+    };
+    let start = boundary.map_or(0, |index| index + 1);
     let namespaces = tool_namespaces(&request.llm_request.extensions);
     let mut tool_texts: Vec<(String, bool)> = Vec::new();
     let mut tool_calls: Vec<ObservedToolCall> = Vec::new();
@@ -1012,12 +1072,14 @@ fn extract_tool_signals_with_window_and_semantics(
     let mut tool_result_count = 0usize;
     let mut assistant_turn_count = 0usize;
 
-    for message in messages {
-        if message.role == Role::Assistant {
+    for (index, message) in messages.iter().enumerate() {
+        if index >= start && message.role == Role::Assistant {
             assistant_turn_count += 1;
         }
         for block in &message.content {
             match block {
+                // Only context-compaction markers carry across user turns.
+                _ if index < start && !matches!(block, ContentBlock::Text { .. }) => continue,
                 ContentBlock::ToolCall(call) => {
                     // Responses namespaced tools arrive as `<namespace>__<tool>`.
                     let bare_name = namespaces
@@ -1029,7 +1091,22 @@ fn extract_tool_signals_with_window_and_semantics(
                         .arguments
                         .as_str()
                         .and_then(|raw| serde_json::from_str::<Value>(raw).ok());
-                    let command_field = command_of(decoded.as_ref().unwrap_or(&call.arguments));
+                    let arguments = decoded.as_ref().unwrap_or(&call.arguments);
+                    let command_field = command_of(arguments);
+                    // Codex uses exec.input for JavaScript. OpenClaw's exec.command
+                    // remains a shell call, even when the names are identical.
+                    let code_semantic = (bare_name.unwrap_or(&call.name) == "exec"
+                        && arguments.get("command").is_none()
+                        && arguments.get("cmd").is_none())
+                    .then(|| arguments.get("input").and_then(Value::as_str))
+                    .flatten()
+                    .map(|input| {
+                        if code_mode_has_patch(input) {
+                            ToolSemantic::Mutate(MutationKind::Edit)
+                        } else {
+                            ToolSemantic::Unknown
+                        }
+                    });
                     let command = command_field.and_then(command_text);
                     // The joined name wins, as in `build_signal`. A joined name
                     // configured as observe still counts when its bare name is a
@@ -1045,7 +1122,8 @@ fn extract_tool_signals_with_window_and_semantics(
                         }
                         _ => call.name.as_str(),
                     };
-                    let is_retrieval = is_retrieval_tool(name, command_field);
+                    let is_retrieval =
+                        code_semantic.is_none() && is_retrieval_tool(name, command_field);
                     if !call.id.is_empty() {
                         // A reused ID links to its latest call.
                         if is_retrieval {
@@ -1059,6 +1137,7 @@ fn extract_tool_signals_with_window_and_semantics(
                         bare_name,
                         command,
                         is_retrieval,
+                        code_semantic,
                     });
                 }
                 ContentBlock::ToolResult(result) => {
@@ -1083,13 +1162,22 @@ fn extract_tool_signals_with_window_and_semantics(
                             .filter(|value| {
                                 value["output"].is_string() && value.get("exit_code").is_some()
                             });
-                        let shell_failed = shell_result.as_ref().is_some_and(|value| {
-                            value["exit_code"].as_i64().is_some_and(|code| code != 0)
-                                || value["success"].as_bool() == Some(false)
-                                || value["error"]
-                                    .as_str()
-                                    .is_some_and(|error| !error.trim().is_empty())
-                        }) || has_nonzero_exit_status(&text.to_lowercase());
+                        // Codex reports the exit status in a header before `Output:`.
+                        // An exit line after it is part of what was read.
+                        let status = text
+                            .split_once("\nOutput:\n")
+                            .map_or(text.as_str(), |(header, _)| header);
+                        // Hermes reports it in fields, so its output is not scanned.
+                        let shell_failed = match &shell_result {
+                            Some(value) => {
+                                value["exit_code"].as_i64().is_some_and(|code| code != 0)
+                                    || value["success"].as_bool() == Some(false)
+                                    || value["error"]
+                                        .as_str()
+                                        .is_some_and(|error| !error.trim().is_empty())
+                            }
+                            None => has_nonzero_exit_status(&status.to_lowercase()),
+                        };
                         if is_missing_file(&text) || (!is_error && !shell_failed) {
                             // Keep the window slot after dropping retrieved content.
                             if !text.is_empty() {
@@ -1177,7 +1265,7 @@ fn extract_tool_signals_with_window_and_semantics(
     let mut signal = build_signal(
         tool_texts,
         tool_calls,
-        messages.len() as u32,
+        (messages.len() - boundary.unwrap_or(0)) as u32,
         recent_window,
         semantics,
     );
@@ -1297,12 +1385,15 @@ fn build_signal(
         // Every read, found or missed, is an observation. The read check parses
         // the command, so it beats the substring patterns. Otherwise the joined
         // name wins, so configs that list it keep working.
-        let mut cat = if tc.is_retrieval {
+        let mut cat = if let Some(semantic) = tc.code_semantic {
+            semantic
+        } else if tc.is_retrieval {
             ToolSemantic::Observe
         } else {
             classify_tool_call_with_semantics(&tc.name, tc.command.as_deref(), semantics)
         };
         if matches!(cat, ToolSemantic::Unknown)
+            && tc.code_semantic.is_none()
             && let Some(bare_name) = tc.bare_name
         {
             cat = classify_tool_call_with_semantics(bare_name, tc.command.as_deref(), semantics);
@@ -1719,6 +1810,17 @@ mod tests {
     }
 
     #[test]
+    fn user_turn_signals_exclude_old_errors_and_keep_user_role_tool_results() {
+        let mut user = Message::text(Role::User, "next");
+        user.content.extend(tr("out of memory").content);
+        let request = with_messages(vec![tr("out of memory"), user, tr("ok")]);
+        let signals = ToolSignalProcessor::default().for_user_turn(&request);
+        assert_eq!(signals.tool_result_count, 1);
+        assert_eq!(signals.severity, 0.0);
+        assert_eq!(signals.turn_depth, 2);
+    }
+
+    #[test]
     fn clean_text_has_zero_severity() {
         let (sev, patterns) = classify_text("everything went fine");
         assert_eq!(sev, 0.0);
@@ -2103,6 +2205,46 @@ mod tests {
     }
 
     #[test]
+    fn codex_read_status_comes_from_the_header() {
+        let read = |header: &str| {
+            let output = format!(
+                "{header}\nOutput:\nTraceback (most recent call last):\nMemoryError\nProcess exited with code 1\n"
+            );
+            let call = exec_command(json!({"cmd": "cat run.log"}));
+            ToolSignals::from_request(&call_with_result(call, tr(&output)), None).severity
+        };
+        // The exit line belongs to the log that was read.
+        assert_eq!(read("Chunk ID: abc\nProcess exited with code 0"), 0.0);
+        // The read itself failed, so its output counts.
+        assert_eq!(read("Chunk ID: abc\nProcess exited with code 1"), CRITICAL);
+    }
+
+    #[test]
+    fn hermes_read_status_comes_from_exit_code() {
+        let read = |exit_code: i64| {
+            let output = json!({
+                "output": "Traceback (most recent call last):\nMemoryError\nProcess exited with code 1\n",
+                "exit_code": exit_code,
+                "error": null,
+            });
+            let call = Message {
+                role: Role::Assistant,
+                content: vec![ContentBlock::ToolCall(ToolCall {
+                    id: String::new(),
+                    name: "terminal".to_string(),
+                    arguments: json!({"command": "cat run.log"}),
+                })],
+            };
+            ToolSignals::from_request(&call_with_result(call, tr(&output.to_string())), None)
+                .severity
+        };
+        // The exit line belongs to the log that was read.
+        assert_eq!(read(0), 0.0);
+        // The read itself failed, so its output counts.
+        assert_eq!(read(1), CRITICAL);
+    }
+
+    #[test]
     fn argv_commands_keep_word_boundaries() {
         let signal = |argv: Value| {
             let call = exec_command(json!({"cmd": argv}));
@@ -2437,9 +2579,15 @@ mod tests {
                 Role::User,
                 "This session is being continued from a previous conversation that ran out of context.",
             ),
+            Message::text(Role::User, "Continue with the next task"),
             bash("ls"),
         ]);
         assert!(ToolSignals::from_request(&request, None).compacted);
+        assert!(
+            ToolSignalProcessor::default()
+                .for_user_turn(&request)
+                .compacted
+        );
     }
 
     #[test]

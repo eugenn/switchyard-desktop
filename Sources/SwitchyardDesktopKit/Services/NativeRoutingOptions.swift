@@ -34,6 +34,7 @@ package enum NativeRoutingOptions {
     private static let targetKeys: Set<String> = [
         "target", "default_target", "classifier_target", "strong_target", "weak_target",
         "efficient_target", "capable_target", "executor_target", "advisor_target",
+        "judge_target", "capable_judge_target",
     ]
 
     /// Every target a native route body names, including its model groups.

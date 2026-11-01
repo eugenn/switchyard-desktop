@@ -137,6 +137,8 @@ package enum SwitchyardConfigWriter {
             return "type = \"auto\"\n" + tiers
         case .planExecute:
             return "type = \"plan_execute\"\n" + tiers
+        case .vgr:
+            return "type = \"vgr\"\n" + tiers + "mode = \"shadow\"\n"
         case .stageRouter:
             return "type = \"stage_router\"\n" + tiers
                 + "picker = \"efficient_first\"\nconfidence_threshold = 0.5\nrecent_turn_window = 3\n"

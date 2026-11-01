@@ -166,6 +166,42 @@ func nativeRoutingFixtures() throws {
     #expect(profile.managedLiteLLMModels == nil)
 }
 
+@Test func verificationGatedRoutingStartsInShadowModeWithDistinctModels() throws {
+    var profile = parityProfile(.vgr)
+    let document = try TOMLTable(string: SwitchyardConfigWriter.render(profile: profile))
+    let route = try #require(document["routes"]?.table?["main"]?.table)
+    #expect(route["type"]?.string == "vgr")
+    #expect(route["mode"]?.string == "shadow")
+    #expect(route["active_approval"] == nil)
+    #expect(route["efficient_target"]?.string == "efficient")
+    #expect(route["capable_target"]?.string == "capable")
+    profile.tiers[1].modelID = profile.tiers[0].modelID
+    #expect(!profile.isValid)
+}
+
+@Test func verificationGatedJudgesSurviveMigrationAndRequireExistingTargets() throws {
+    var profile = parityProfile(.vgr)
+    profile.judgeModelID = "separate-judge"
+    profile.nativeRouteOptions = SwitchyardConfigWriter.defaultRouteOptions(profile: profile)
+        + "judge_target = \"judge\"\ncapable_judge_target = \"capable\"\n"
+    #expect(profile.isValid)
+    let directory = UserDataLocations.testSandbox.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let path = directory.appendingPathComponent("routes.toml")
+    try SwitchyardConfigWriter.write(profile: profile, to: path)
+    let restored = try SavedRoutingSetup.migrateGeneratedConfig(from: path)
+    #expect(restored.isUsable)
+    #expect(restored.profile.judgeModelID == "separate-judge")
+    let before = try TOMLTable(string: SwitchyardConfigWriter.render(profile: profile))
+    let after = try TOMLTable(string: SwitchyardConfigWriter.render(profile: restored.profile))
+    #expect(before["routes"]?.table?.convert(to: .json) == after["routes"]?.table?.convert(to: .json))
+    for key in ["judge_target", "capable_judge_target"] {
+        profile.nativeRouteOptions = SwitchyardConfigWriter.defaultRouteOptions(profile: profile)
+            + "\(key) = \"missing\"\n"
+        #expect(!profile.isValid)
+    }
+}
+
 @Test func algorithmMenuCoversEveryNativeServerRouteType() throws {
     let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         .deletingLastPathComponent().deletingLastPathComponent()
