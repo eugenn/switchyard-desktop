@@ -11,18 +11,18 @@ This is an independent community project using a
 [NVIDIA Switchyard](https://github.com/NVIDIA-NeMo/Switchyard). It is not affiliated
 with or endorsed by NVIDIA or OpenAI.
 
-![Statistics screen](images/ui.png)
+![Activity screen](images/ui.png)
 
 ## Download
 
-[Download the DMG for Apple Silicon (arm64)](https://github.com/eugenn/switchyard-desktop/releases/download/v0.1.0-preview.2/switchyard-desktop-0.1.0-2-arm64-local.dmg)
-[![DMG downloads](https://img.shields.io/github/downloads/eugenn/switchyard-desktop/v0.1.0-preview.2/switchyard-desktop-0.1.0-2-arm64-local.dmg?label=DMG%20downloads&displayAssetName=false&color=blue)](https://github.com/eugenn/switchyard-desktop/releases/tag/v0.1.0-preview.2)
+[Download the DMG for Apple Silicon (arm64)](https://github.com/eugenn/switchyard-desktop/releases/download/v0.1.0-preview.3/switchyard-desktop-0.1.0-3-arm64-local.dmg)
+[![DMG downloads](https://img.shields.io/github/downloads/eugenn/switchyard-desktop/v0.1.0-preview.3/switchyard-desktop-0.1.0-3-arm64-local.dmg?label=DMG%20downloads&displayAssetName=false&color=blue)](https://github.com/eugenn/switchyard-desktop/releases/tag/v0.1.0-preview.3)
 — macOS 14 or later.
 
-This is the **v0.1.0-preview.2 test prerelease**, ad-hoc signed without an Apple
+This is the **v0.1.0-preview.3 test prerelease**, ad-hoc signed without an Apple
 Developer ID signature or Apple notarization. An Intel DMG is not available for
-this preview. See the [release notes and known limitations](https://github.com/eugenn/switchyard-desktop/releases/tag/v0.1.0-preview.2)
-and the [SHA-256 checksum](https://github.com/eugenn/switchyard-desktop/releases/download/v0.1.0-preview.2/switchyard-desktop-0.1.0-2-arm64-local.dmg.sha256).
+this preview. See the [release notes and known limitations](https://github.com/eugenn/switchyard-desktop/releases/tag/v0.1.0-preview.3)
+and the [SHA-256 checksum](https://github.com/eugenn/switchyard-desktop/releases/download/v0.1.0-preview.3/switchyard-desktop-0.1.0-3-arm64-local.dmg.sha256).
 
 ## Providers and clients
 
