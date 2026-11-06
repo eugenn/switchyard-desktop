@@ -62,6 +62,39 @@ you want to use. These requirements apply to this integration.
 
 Keep the app running while using the route. Use **Stop routing** when finished.
 
+### Use Jev as the classifier (source builds)
+
+TypeSafe provides the Jev classifier. You need a TypeSafe account and an API
+key from [typesafe.ai](https://typesafe.ai/) before you start. Sign in to your
+TypeSafe account, open its API key settings, and create a key. Copy it somewhere
+safe temporarily; treat it like a password and do not share it.
+
+1. Choose **Custom classifier** and assign models and descriptions to your roles,
+   or choose **Capability classifier** / **Composite** with Efficient and Capable.
+2. Under **Routing decisions**, choose **Jev / TypeSafe** as the routing judge.
+3. Paste the key you created in TypeSafe into the API key field and click
+   **Save in Keychain**. This saves the key in macOS Keychain, Apple's secure
+   password storage, so you do not have to paste it every time. You can change
+   or remove the saved key here or in Settings. The key is not included in saved
+   setups or generated configuration files.
+4. Keep `jev-latest` or enter a model ID available to your TypeSafe account.
+   For Capability and Composite, set the probability cutoff (default `0.6`); Capable is selected only when its
+   probability exceeds this value. Optional decision instructions must preserve
+   the meanings of `capable` and `efficient`. Custom classifier uses the server's
+   `direct` decision mode: Jev chooses among your role descriptions, without a cutoff.
+5. Review and start routing. Existing custom route options must be reviewed and
+   reset to the native preset before Jev can be enabled.
+
+The bundled server calls TypeSafe's System One API directly. It receives the
+key through its environment, including during configuration validation; the
+desktop app does not register Jev with LiteLLM. Conversation context is sent to
+TypeSafe for classification and billed separately. Codex models still produce
+the answers. Advisor still requires an LLM judge.
+
+On a failed Jev call, Custom classifier uses its default target, Capability falls back to Capable; Composite retains its
+previous classified tier or starts Efficient for a new session. Key changes
+take effect the next time routing starts. Stop routing before revoking a key.
+
 ### Opening the unnotarized preview
 
 Only approve the app if you trust this project and downloaded it from this
