@@ -1,6 +1,11 @@
 # Application experience
 
-`switchyard-desktop` opens the Statistics window on launch. **Routing config** opens
+`switchyard-desktop` opens the Statistics window on launch. The window switches between
+**Overview**, **Activity** and **Requests** from a segmented control in its toolbar.
+Activity leads with a one-line summary of the conversation and a signal box: the
+classifier fans out into one lane per route, and each lane carries its traffic
+share, a tick per served turn on a shared time axis, and the context used on that
+model. Latency per model and the newest turns sit below it. **Routing config** opens
 its setup wizard. Both windows use the same `WizardModel`, routing profile and
 process lifecycle. Opening either window does not start or stop routing.
 The app provides one executable, `SwitchyardDesktopApp`, and one packaged app,
@@ -52,3 +57,7 @@ swift test --filter renderWizardForVisualReview
 This writes an image for each of the three setup steps. The roles editor can
 be rendered with `SWITCHYARD_DESKTOP_RENDER_ROLES` and
 `swift test --filter renderRolesEditorForVisualReview`.
+
+The routing window renders from a fixture log with
+`SWITCHYARD_DESKTOP_RENDER_STATISTICS` and
+`swift test --filter renderStatisticsWindowForVisualReview`, one image per pane.

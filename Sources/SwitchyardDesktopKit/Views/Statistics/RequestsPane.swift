@@ -210,7 +210,7 @@ package struct RequestsPane: View {
                     Prompts and source code pass through the local proxy to the upstream \
                     endpoint. switchyard-desktop shows only what Switchyard recorded: the model that \
                     served the turn and its token usage. Latency and error counts live in the \
-                    proxy's own counters, on the Statistics pane.
+                    proxy's own counters, on the Activity pane.
                     """
                 )
                 .font(RouterTheme.sans(10.5))

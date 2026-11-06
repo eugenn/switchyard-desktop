@@ -32,28 +32,20 @@ package struct StatisticsWindow: View {
 
     package var body: some View {
         VStack(spacing: 0) {
-            liveBar
+            toolbar
             RouterDivider()
 
-            HStack(alignment: .top, spacing: 0) {
-                rail
-                    .frame(width: 48)
-                Rectangle()
-                    .fill(RouterTheme.line)
-                    .frame(width: 1)
-
-                Group {
-                    switch monitor.pane {
-                    case .overview:
-                        OverviewPane(monitor: monitor, openSetup: openSetup)
-                    case .statistics:
-                        StatisticsPane(monitor: monitor)
-                    case .requests:
-                        RequestsPane(monitor: monitor)
-                    }
+            Group {
+                switch monitor.pane {
+                case .overview:
+                    OverviewPane(monitor: monitor, openSetup: openSetup)
+                case .statistics:
+                    StatisticsPane(monitor: monitor)
+                case .requests:
+                    RequestsPane(monitor: monitor)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .background(RouterTheme.win)
         .environment(\.colorScheme, .dark)
@@ -79,34 +71,52 @@ package struct StatisticsWindow: View {
         }
     }
 
-    // MARK: - Live bar
+    // MARK: - Toolbar
 
-    private var liveBar: some View {
-        HStack(spacing: 8) {
-            RouterDot(
-                color: monitor.isRouting ? RouterTheme.accent : RouterTheme.idle,
-                halo: monitor.isRouting
-            )
-            Text(monitor.isRouting ? "Routing on" : "Routing off")
-                .font(RouterTheme.sans(11.5, .medium))
-                .foregroundStyle(monitor.isRouting ? RouterTheme.ink : RouterTheme.ink2)
-
-            if let lastRefresh = monitor.lastRefresh {
-                Text("· updated \(lastRefresh.formatted(date: .omitted, time: .standard))")
-                    .font(RouterTheme.mono(10))
-                    .foregroundStyle(RouterTheme.ink3)
+    /// One bar for the whole window: what is running, where you are, and the
+    /// controls that act on routing. The panes switch from a segmented control
+    /// here rather than an icon rail, which gives the panes the full width.
+    private var toolbar: some View {
+        HStack(spacing: 12) {
+            HStack(spacing: 7) {
+                RouterDot(
+                    color: monitor.isRouting ? RouterTheme.accent : RouterTheme.idle,
+                    halo: monitor.isRouting
+                )
+                Text("Switchyard")
+                    .font(RouterTheme.sans(13.5, .semibold))
+                    .foregroundStyle(RouterTheme.ink)
             }
+
+            paneSwitcher
+                .padding(.leading, 6)
 
             Spacer(minLength: 10)
 
             if let statsError = monitor.statsError {
                 Text(statsError)
-                    .font(RouterTheme.mono(10))
+                    .font(RouterTheme.sans(11.5))
                     .foregroundStyle(RouterTheme.warn)
                     .lineLimit(1)
+                    .truncationMode(.middle)
             }
 
+            Text(routingStatus)
+                .font(RouterTheme.sans(12))
+                .foregroundStyle(monitor.isRouting ? RouterTheme.ink2 : RouterTheme.ink3)
+                .monospacedDigit()
+                .lineLimit(1)
+
             RefreshButton(monitor: monitor)
+
+            if let openSetup {
+                Button(action: openSetup) {
+                    Image(systemName: "slider.horizontal.3")
+                }
+                .buttonStyle(LiveBarIconButtonStyle())
+                .help("Routing config")
+                .accessibilityLabel("Routing config")
+            }
 
             if showsStartControl {
                 RoutingToggleButton(
@@ -117,8 +127,51 @@ package struct StatisticsWindow: View {
                 }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 14)
+        .frame(height: 46)
+        .background(RouterTheme.rail)
+    }
+
+    private var routingStatus: String {
+        guard monitor.isRouting else { return "Routing off" }
+        guard let uptime = monitor.uptime else { return "Routing on" }
+        return "Routing on · \(uptime)"
+    }
+
+    private static let paneOrder: [RoutingMonitor.Pane] = [.overview, .statistics, .requests]
+
+    private var paneSwitcher: some View {
+        HStack(spacing: 2) {
+            ForEach(Self.paneOrder) { pane in
+                let isSelected = monitor.pane == pane
+                Button {
+                    monitor.pane = pane
+                } label: {
+                    Text(pane.title)
+                        .font(RouterTheme.sans(12.5, isSelected ? .medium : .regular))
+                        .foregroundStyle(isSelected ? RouterTheme.ink : RouterTheme.ink2)
+                        .padding(.horizontal, 13)
+                        .frame(height: 24)
+                        .background {
+                            if isSelected {
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(RouterTheme.panel2)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                            .strokeBorder(RouterTheme.line2, lineWidth: 1)
+                                    )
+                                    .shadow(color: .black.opacity(0.35), radius: 1, y: 1)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+            }
+        }
+        .padding(2)
+        .background(RouterTheme.sunk, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(RouterTheme.line, lineWidth: 1))
     }
 
     private var routingPhase: RoutingPhase {
@@ -182,62 +235,6 @@ package struct StatisticsWindow: View {
         failureTitle = title
         failureMessage = message
         showsFailure = true
-    }
-
-    // MARK: - Rail
-
-    private var rail: some View {
-        VStack(spacing: 2) {
-            ForEach(RoutingMonitor.Pane.allCases) { pane in
-                railItem(
-                    title: pane.title,
-                    symbol: pane.symbol,
-                    isSelected: monitor.pane == pane
-                ) {
-                    monitor.pane = pane
-                }
-            }
-
-            Spacer(minLength: 8)
-
-            if let openSetup {
-                RouterDivider()
-                    .padding(.horizontal, 6)
-                    .padding(.bottom, 4)
-                railItem(title: "Routing config", symbol: "gearshape", isSelected: false) {
-                    openSetup()
-                }
-            }
-        }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 8)
-        .frame(maxHeight: .infinity, alignment: .top)
-        .background(RouterTheme.rail)
-    }
-
-    /// Icon-only rail button: the name lives in the tooltip and in the
-    /// accessibility label so the rail stays one narrow column.
-    private func railItem(
-        title: String,
-        symbol: String,
-        isSelected: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 14))
-                .foregroundStyle(isSelected ? RouterTheme.accent : RouterTheme.ink2)
-                .frame(width: 36, height: 30)
-                .background(
-                    isSelected ? RouterTheme.accent.opacity(0.11) : .clear,
-                    in: RoundedRectangle(cornerRadius: 6)
-                )
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(title)
-        .accessibilityLabel(title)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 

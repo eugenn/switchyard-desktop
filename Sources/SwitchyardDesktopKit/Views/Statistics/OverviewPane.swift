@@ -138,7 +138,7 @@ package struct OverviewPane: View {
             }
 
             HStack(spacing: 14) {
-                Button("Open statistics") { monitor.pane = .statistics }
+                Button("Open activity") { monitor.pane = .statistics }
                     .buttonStyle(.routerGhost)
                 if let openSetup {
                     Button("Change in Routing config", action: openSetup)

@@ -1,88 +1,146 @@
 import SwiftUI
 
-/// Where requests went: headline rates, latency percentiles over time, the
-/// share each model served, and a per-target table. Everything here is computed
-/// from the durable routing log plus the proxy's own counters.
+/// Where requests went: a one-line summary of the conversation, the signal
+/// box that shows each route's share, history and context, then latency and
+/// the newest turns. Below the fold sit the per-target table, the proxy's own
+/// lifetime counters and subagent traffic. Everything is computed from the
+/// durable routing log plus the proxy's counters.
 package struct StatisticsPane: View {
     @Bindable var monitor: RoutingMonitor
 
     package var body: some View {
         ScrollView {
             let metrics = monitor.activityMetrics
+            let session = monitor.flowSession
 
-            VStack(alignment: .leading, spacing: 10) {
-                PaneHeader(eyebrow: "Live model activity", title: "Where requests go") {
-                    EmptyView()
-                }
+            VStack(alignment: .leading, spacing: 12) {
+                summary(metrics)
 
-                kpis(metrics)
-
-                RequestFlowView(
+                SignalBoxView(
                     metrics: metrics, modelIDs: monitor.modelIDs, isRouting: monitor.isRouting,
-                    sessions: monitor.sessions, asOf: monitor.lastRefresh,
+                    asOf: monitor.lastRefresh,
                     usesClassifier: monitor.usesClassifier,
                     classifierModelID: monitor.classifierModelID,
+                    roles: monitor.flowRoles,
+                    ticks: SignalBoxView.ticks(
+                        records: monitor.records, sessionID: session?.id,
+                        start: metrics.windowStart, end: metrics.windowEnd
+                    ),
                     contextUsage: monitor.sessionContextUsage,
                     contextSession: monitor.contextSession,
+                    sessions: monitor.sessions,
                     activeSessionIDs: monitor.activeSessionIDs,
-                    routeContextWindow: monitor.sessionRouteContextWindow,
-                    roles: monitor.flowRoles,
                     selectedModelID: $monitor.selectedModelID,
                     selectedSessionID: $monitor.selectedSessionID
                 )
 
-                modelFilters
-                performancePanel(monitor.selectedModelMetrics)
+                HStack(alignment: .top, spacing: 12) {
+                    latencyCard
+                        .frame(maxWidth: .infinity)
+                    latestTurnsCard(session: session)
+                        .frame(maxWidth: .infinity)
+                }
+                .frame(height: 160)
+
                 modelsAndProxyPanel(metrics)
                 subagentsPanel(metrics)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
+            .padding(.horizontal, 18)
+            .padding(.top, 14)
+            .padding(.bottom, 18)
         }
     }
 
-    // MARK: - KPIs
+    // MARK: - Summary
 
-    private func kpis(_ metrics: RoutingMetrics) -> some View {
-        HStack(spacing: 0) {
-            KPITile(
-                label: "Requests",
-                value: rate(metrics.requestsPerSecond),
-                unit: "req/s",
-                subtitle: servedSubtitle(metrics)
+    /// The conversation in one line: five numbers, each with a plain label,
+    /// and the scope they are measured over at the end of the line.
+    private func summary(_ metrics: RoutingMetrics) -> some View {
+        HStack(alignment: .bottom, spacing: 0) {
+            stat(metrics.count.formatted(), label: Text(metrics.count == 1 ? "request routed" : "requests routed"))
+                .help(servedHelp(metrics))
+            divider
+            errorStat
+            divider
+            stat(
+                metrics.tokens.formatted(.number.notation(.compactName)),
+                label: Text(tokensLabel(metrics))
             )
             divider
-            KPITile(
-                label: "Model errors",
-                value: monitor.stats.map { String($0.totalErrors) } ?? "—",
-                subtitle: "since router started",
-                // A failing judge never shows up here: the route keeps serving
-                // its default target, so name it where the errors are read.
-                highlight: monitor.classifierFailure ?? fallbackHighlight
-            )
+            stat(cacheEfficiency(metrics), unit: metrics.tokens > 0 ? "%" : nil, label: Text("served from cache"))
+                .help(cacheHelp(metrics))
             divider
-            KPITile(
-                label: "Tokens processed",
-                value: metrics.tokens.formatted(.number.notation(.compactName)),
-                unit: "tok",
-                subtitle: tokensSubtitle(metrics)
-            )
-            divider
-            KPITile(
-                label: "Cache efficiency",
-                value: cacheEfficiency(metrics),
-                subtitle: cacheSubtitle(metrics)
-            )
-            divider
-            costTile(monitor.sessionCost)
+            costStat(monitor.sessionCost)
+            Spacer(minLength: 12)
+            scope
         }
-        .padding(10)
-        .background(RouterTheme.panel, in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(RouterTheme.line2, lineWidth: 1))
+        .frame(height: 50)
+    }
+
+    private func stat(_ value: String, unit: String? = nil, label: Text, tint: Color? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            (Text(value).font(RouterTheme.sans(23, .semibold))
+                + Text(unit ?? "").font(RouterTheme.sans(13, .medium)).foregroundColor(RouterTheme.ink2))
+                .foregroundStyle(tint ?? RouterTheme.ink)
+                .monospacedDigit()
+            label
+                .font(RouterTheme.sans(11.5))
+                .foregroundStyle(RouterTheme.ink3)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 18)
+    }
+
+    private var errorStat: some View {
+        let errors = monitor.stats?.totalErrors
+        // A failing judge never shows up as an error: the route keeps serving
+        // its default target, so name it where the errors are read.
+        let warning = monitor.classifierFailure ?? fallbackHighlight
+        let label: Text
+        if let warning {
+            label = Text(warning).foregroundColor(RouterTheme.warn)
+        } else if let errors {
+            label = Text("● ").foregroundColor(errors > 0 ? RouterTheme.crit : RouterTheme.accent)
+                + Text(errors == 1 ? "model error" : "model errors")
+        } else {
+            label = Text("model errors")
+        }
+        return stat(
+            errors.map(String.init) ?? "—", label: label,
+            tint: (errors ?? 0) > 0 ? RouterTheme.crit : nil
+        )
+        .help("Errors the proxy returned since switchyard-server started.")
+    }
+
+    private var scope: some View {
+        let session = monitor.flowSession
+        let started = session?.startedAt
+        return VStack(alignment: .trailing, spacing: 2) {
+            Text(session == nil ? "Last 15 minutes" : "This session")
+                .font(RouterTheme.sans(11.5, .medium))
+                .foregroundStyle(RouterTheme.ink2)
+            Group {
+                switch (started, monitor.lastRefresh) {
+                case let (started?, refresh?):
+                    Text("since \(started.formatted(date: .omitted, time: .shortened)) · updated \(refresh.formatted(date: .omitted, time: .standard))")
+                case let (nil, refresh?):
+                    Text("updated \(refresh.formatted(date: .omitted, time: .standard))")
+                case let (started?, nil):
+                    Text("since \(started.formatted(date: .omitted, time: .shortened))")
+                case (nil, nil):
+                    Text("waiting for the first read")
+                }
+            }
+            .font(RouterTheme.sans(11.5))
+            .foregroundStyle(RouterTheme.ink3)
+            .monospacedDigit()
+        }
+        .lineLimit(1)
+        .padding(.bottom, 1)
     }
 
     /// When Switchyard fell back because the primary model failed, the error
-    /// KPI names which fallback took over so the operator sees the failover.
+    /// stat names which fallback took over so the operator sees the failover.
     private var fallbackHighlight: String? {
         guard let stats = monitor.stats else { return nil }
         let active = stats.fallbacks.filter { $0.value > 0 }
@@ -90,17 +148,16 @@ package struct StatisticsPane: View {
         return "fallback: \(first)"
     }
 
-    private func servedSubtitle(_ metrics: RoutingMetrics) -> String {
-        let scope = monitor.flowSession == nil ? MetricsRange.fifteenMinutes.label : "session"
-        let total = "\(metrics.count) served in \(scope)"
-        guard let seconds = metrics.secondsPerRequest else { return total }
-        return "\(total) · 1 every \(String(format: "%.1f", seconds))s"
+    private func servedHelp(_ metrics: RoutingMetrics) -> String {
+        let scope = monitor.flowSession == nil ? "the last 15 minutes" : "this session"
+        guard let seconds = metrics.secondsPerRequest else { return "Turns routed in \(scope)." }
+        return "Turns routed in \(scope), one every \(String(format: "%.1f", seconds)) s."
     }
 
-    private func tokensSubtitle(_ metrics: RoutingMetrics) -> String {
-        guard metrics.count > 0 else { return "none in window" }
+    private func tokensLabel(_ metrics: RoutingMetrics) -> String {
+        guard metrics.count > 0 else { return "tokens" }
         let average = metrics.tokens / metrics.count
-        return "\(average.formatted()) avg / turn"
+        return "tokens · \(average.formatted(.number.notation(.compactName))) per turn"
     }
 
     private func cacheEfficiency(_ metrics: RoutingMetrics) -> String {
@@ -109,41 +166,33 @@ package struct StatisticsPane: View {
         // of the prompt that was a cache hit, not a fraction over-counting it.
         guard metrics.tokens > 0 else { return "—" }
         let fraction = Double(metrics.cachedTokens) / Double(metrics.tokens)
-        return percent(fraction) + "%"
+        return percent(fraction)
     }
 
-    private func cacheSubtitle(_ metrics: RoutingMetrics) -> String {
-        guard metrics.cachedTokens > 0 else { return "no cache hits in window" }
-        return "\(metrics.cachedTokens.formatted(.number.notation(.compactName))) cached tokens"
+    private func cacheHelp(_ metrics: RoutingMetrics) -> String {
+        guard metrics.cachedTokens > 0 else { return "No cache hits in this window." }
+        return "\(metrics.cachedTokens.formatted()) of \(metrics.tokens.formatted()) prompt tokens were cache hits."
     }
 
-    /// Approximate spend for the flow map's conversation at API list prices.
+    /// Approximate spend for the map's conversation at API list prices.
     /// Tokens on a model LiteLLM has no price for are named, not guessed.
-    private func costTile(_ cost: TokenCostEstimate) -> some View {
-        let session = monitor.flowSession
+    private func costStat(_ cost: TokenCostEstimate) -> some View {
         let hasPrice = cost.pricedCalls > 0
         let unpriced = cost.unpricedModels.first.map { first in
             cost.unpricedModels.count == 1 ? first : "\(first) +\(cost.unpricedModels.count - 1)"
         }
-        let subtitle: String
+        let label: Text
         if cost.isEmpty {
-            subtitle = "no calls in session"
-        } else if !hasPrice {
-            subtitle = "no list price for"
+            label = Text("no calls to price")
+        } else if let unpriced {
+            label = Text(hasPrice ? "est. · excl. " : "no list price for ")
+                + Text(unpriced).foregroundColor(RouterTheme.warn)
         } else {
-            // The full price basis is in the tooltip; the tile keeps one line.
-            subtitle = unpriced == nil ? "at API list price" : "excl."
+            label = Text("est. at API list price")
         }
-        return KPITile(
-            label: session == nil ? "Est. cost" : "Session cost",
-            value: hasPrice ? dollars(cost.dollars) : "—",
-            unit: hasPrice ? "est." : nil,
-            subtitle: subtitle,
-            highlight: unpriced
-        )
-        .help(costHelp(cost, session: session))
+        return stat(hasPrice ? dollars(cost.dollars) : "—", label: label)
+            .help(costHelp(cost, session: monitor.flowSession))
     }
-
     private func costHelp(_ cost: TokenCostEstimate, session: RoutingSession?) -> String {
         let scope = session.map { "\($0.title), judge calls included" } ?? "The last 15 minutes of traffic"
         var lines = [
@@ -192,173 +241,214 @@ package struct StatisticsPane: View {
             .padding(.vertical, 4)
     }
 
-    // MARK: - Panels
+    // MARK: - Latency and latest turns
 
-    /// Filter pills that let the operator isolate one model's latency and
-    /// sparkline without having to click the node in the diagram.
-    private var modelFilters: some View {
-        HStack(spacing: 6) {
-            Text("Filter:")
-                .font(RouterTheme.mono(10.5))
-                .foregroundStyle(RouterTheme.ink3)
-
-            filterPill(id: nil, title: "All models", count: monitor.activityMetrics.count)
-
-            ForEach(monitor.activityMetrics.shares) { share in
-                filterPill(id: share.id, title: share.id, count: share.count)
-            }
-            Spacer()
-        }
-    }
-
-    private func filterPill(id: String?, title: String, count: Int) -> some View {
-        let selected = monitor.selectedModelID == id
-        return Button {
-            monitor.selectedModelID = id
-        } label: {
-            HStack(spacing: 5) {
-                if let id {
-                    Circle()
-                        .fill(ModelFlowPalette.color(for: id, in: monitor.modelIDs))
-                        .frame(width: 6, height: 6)
-                }
-                Text(title)
-                    .font(RouterTheme.mono(10.5))
-                    .foregroundStyle(selected ? RouterTheme.ink : RouterTheme.ink2)
-                Text("\(count)")
-                    .font(RouterTheme.mono(9.5))
-                    .foregroundStyle(RouterTheme.ink3)
-            }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 4)
-            .background(selected ? RouterTheme.accent.opacity(0.12) : RouterTheme.panel2, in: Capsule())
-            .overlay(Capsule().strokeBorder(selected ? RouterTheme.accent.opacity(0.5) : RouterTheme.line2, lineWidth: 1))
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(selected ? .isSelected : [])
-    }
-
-    /// Combined latency and turns activity panel, saving vertical space by placing
-    /// lifetime latency percentiles side-by-side with the durable log's activity sparkline.
-    private func performancePanel(_ metrics: RoutingMetrics) -> some View {
-        StatsPanel(
-            title: "Latency & Routed turns",
-            note: "\(monitor.range.label) history · latency since start",
-            accessory: AnyView(
-                Text("\(metrics.count) turns · \(metrics.tokens.formatted(.number.notation(.compactName))) tokens")
-                    .font(RouterTheme.mono(10))
-                    .foregroundStyle(RouterTheme.ink3)
+    /// Each model's p50 as a marker on a shared scale, with a faint bar out to
+    /// its p99, so slow tails read against each other at a glance.
+    private var latencyCard: some View {
+        let models = monitor.selectedLatencies
+        let ceiling = max(models.compactMap { $0.latency?.p99Milliseconds }.max() ?? 1, 1)
+        return card(
+            title: "Latency",
+            hint: monitor.selectedModelID.map { "\($0) · p50 / p99, s" } ?? "p50 / p99, seconds",
+            accessory: monitor.selectedModelID == nil ? nil : AnyView(
+                Button("Show all") { monitor.selectedModelID = nil }
+                    .buttonStyle(.plain)
+                    .font(RouterTheme.sans(11.5))
+                    .foregroundStyle(RouterTheme.ink2)
             )
         ) {
-            HStack(alignment: .top, spacing: 18) {
-                // Left column: End-to-end latency
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("LATENCY")
-                            .font(RouterTheme.mono(9.5, .medium))
-                            .tracking(0.7)
-                            .foregroundStyle(RouterTheme.ink3)
-                        Spacer()
-                        Text("milliseconds")
-                            .font(RouterTheme.mono(9.5))
-                            .foregroundStyle(RouterTheme.ink3)
-                    }
-
-                    let models = monitor.selectedLatencies
-                    if models.isEmpty {
-                        Text("No latency measurements for this selection yet.")
-                            .font(RouterTheme.mono(10.5))
-                            .foregroundStyle(RouterTheme.ink3)
-                            .padding(.vertical, 6)
-                    } else {
-                        VStack(spacing: 5) {
-                            ForEach(models) { model in
-                                if let latency = model.latency {
-                                    HStack(spacing: 10) {
-                                        Circle()
-                                            .fill(ModelFlowPalette.color(for: model.id, in: monitor.modelIDs))
-                                            .frame(width: 6, height: 6)
-                                        Text(model.id)
-                                            .font(RouterTheme.mono(11))
-                                            .foregroundStyle(RouterTheme.ink)
-                                            .lineLimit(1)
-                                            .truncationMode(.middle)
-                                        Spacer(minLength: 6)
-                                        legend("p50", latency.p50Milliseconds, RouterTheme.p50)
-                                        legend("p99", latency.p99Milliseconds, RouterTheme.p99)
-                                    }
-                                    .padding(.vertical, 3)
-                                }
-                            }
-                        }
-                    }
-
-                    Text("Switchyard measures latency in aggregate; routing log records token usage only.")
-                        .font(RouterTheme.mono(9.5))
-                        .foregroundStyle(RouterTheme.ink3)
-                        .lineLimit(2)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                // Divider between columns
-                Rectangle()
-                    .fill(RouterTheme.line)
-                    .frame(width: 1)
-                    .frame(maxHeight: .infinity)
-
-                // Right column: Routed turns sparkline
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        HStack(spacing: 6) {
-                            Text("ROUTED TURNS")
-                                .font(RouterTheme.mono(9.5, .medium))
-                                .tracking(0.7)
-                            Text("5 min intervals")
-                                .font(RouterTheme.mono(9.5))
-                        }
-                        .foregroundStyle(RouterTheme.ink3)
-                        Spacer()
-                        Text(monitor.selectedModelID ?? "All models")
-                            .font(RouterTheme.mono(9.5))
-                            .foregroundStyle(RouterTheme.ink2)
-                    }
-
-                    if metrics.count == 0 {
-                        StatsEmptyState(message: "No routed turns for this selection yet.")
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } else {
-                        VStack(spacing: 4) {
-                            Sparkline(values: metrics.buckets.map { Double($0.count) }, tint: RouterTheme.accent)
-                                .frame(height: 52)
-                            HStack {
-                                Text(metrics.windowStart.formatted(date: .omitted, time: .shortened))
-                                Spacer()
-                                Text(metrics.windowEnd.formatted(date: .omitted, time: .shortened))
-                            }
-                            .font(RouterTheme.mono(9.5))
-                            .foregroundStyle(RouterTheme.ink3)
+            if models.isEmpty {
+                Text("No latency measurements yet. The proxy reports them once a model has answered.")
+                    .font(RouterTheme.sans(11.5))
+                    .foregroundStyle(RouterTheme.ink3)
+                    .lineLimit(3)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(models.prefix(4)) { model in
+                        if let latency = model.latency {
+                            latencyRow(model.id, latency, ceiling: ceiling)
                         }
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.top, 2)
+        }
+        .help("Switchyard measures latency per model since the proxy started; the routing log records token usage only.")
+    }
+
+    private func latencyRow(_ id: String, _ latency: RoutingStats.Latency, ceiling: Double) -> some View {
+        let tint = ModelFlowPalette.color(for: id, in: monitor.modelIDs)
+        return HStack(spacing: 12) {
+            HStack(spacing: 7) {
+                Circle().fill(tint).frame(width: 6, height: 6)
+                Text(id)
+                    .font(RouterTheme.mono(11.5))
+                    .foregroundStyle(RouterTheme.ink2)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .frame(width: 112, alignment: .leading)
+
+            GeometryReader { proxy in
+                let width = proxy.size.width
+                ZStack(alignment: .leading) {
+                    Rectangle().fill(RouterTheme.line).frame(height: 1)
+                    Capsule()
+                        .fill(tint.opacity(0.3))
+                        .frame(width: width * latency.p99Milliseconds / ceiling, height: 4)
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(tint)
+                        .frame(width: 3, height: 12)
+                        .offset(x: max(width * latency.p50Milliseconds / ceiling - 1.5, 0))
+                }
+                .frame(maxHeight: .infinity)
+            }
+            .frame(height: 14)
+
+            (Text(seconds(latency.p50Milliseconds)).foregroundColor(RouterTheme.ink)
+                + Text(" / \(seconds(latency.p99Milliseconds))").foregroundColor(RouterTheme.ink3))
+                .font(RouterTheme.sans(11.5))
+                .monospacedDigit()
+                .lineLimit(1)
+                .frame(width: 78, alignment: .trailing)
+        }
+        .frame(height: 26)
+    }
+
+    /// The newest served turns in the map's scope, with the way into the
+    /// full log.
+    private func latestTurnsCard(session: RoutingSession?) -> some View {
+        let turns = latestTurns(session: session)
+        return card(
+            title: "Latest turns",
+            hint: "routing log",
+            accessory: AnyView(
+                Button {
+                    monitor.pane = .requests
+                } label: {
+                    HStack(spacing: 3) {
+                        Text("All requests")
+                        Image(systemName: "arrow.right").font(.system(size: 9, weight: .semibold))
+                    }
+                }
+                .buttonStyle(.plain)
+                .font(RouterTheme.sans(11.5))
+                .foregroundStyle(RouterTheme.ink2)
+            )
+        ) {
+            if turns.isEmpty {
+                Text(monitor.emptyReason ?? "No routed turns in this scope yet.")
+                    .font(RouterTheme.sans(11.5))
+                    .foregroundStyle(RouterTheme.ink3)
+                    .lineLimit(3)
+            } else {
+                VStack(spacing: 0) {
+                    turnRow(time: Text("Time"), route: Text("Route"), model: Text("Model"),
+                            tokens: Text("Tokens"), cached: Text("Cached"), tint: nil, isHeader: true)
+                    ForEach(turns, id: \.id) { record in
+                        RouterDivider()
+                        turnRow(
+                            time: Text(record.timestamp?.formatted(date: .omitted, time: .standard) ?? "—"),
+                            route: Text(monitor.role(for: record) ?? "—"),
+                            model: Text(record.modelIdentity),
+                            tokens: Text(record.tokens.total.formatted()),
+                            cached: Text(cachedShare(record)),
+                            tint: ModelFlowPalette.color(for: record.modelIdentity, in: monitor.modelIDs),
+                            isHeader: false
+                        )
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            monitor.selectedRecordID = record.id
+                            monitor.pane = .requests
+                        }
+                    }
+                }
+            }
         }
     }
 
-    private func legend(_ name: String, _ value: Double?, _ tint: Color) -> some View {
-        HStack(spacing: 5) {
-            RoundedRectangle(cornerRadius: 1)
-                .fill(tint)
-                .frame(width: 8, height: 8)
-            Text(name)
-                .font(RouterTheme.sans(10.5))
-                .foregroundStyle(RouterTheme.ink2)
-            Text(value.map { milliseconds($0) } ?? "—")
-                .font(RouterTheme.mono(10, .medium))
-                .foregroundStyle(RouterTheme.ink)
+    private func turnRow(
+        time: Text, route: Text, model: Text, tokens: Text, cached: Text, tint: Color?, isHeader: Bool
+    ) -> some View {
+        let small = RouterTheme.sans(11)
+        return HStack(spacing: 10) {
+            time
+                .font(isHeader ? small : RouterTheme.mono(11))
+                .foregroundStyle(RouterTheme.ink3)
+                .frame(width: 80, alignment: .leading)
+            HStack(spacing: 7) {
+                if let tint { Circle().fill(tint).frame(width: 6, height: 6) }
+                route
+            }
+            .font(isHeader ? small : RouterTheme.sans(12))
+            .foregroundStyle(isHeader ? RouterTheme.ink3 : RouterTheme.ink)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            model
+                .font(isHeader ? small : RouterTheme.mono(11))
+                .foregroundStyle(isHeader ? RouterTheme.ink3 : RouterTheme.ink2)
+                .frame(width: 92, alignment: .leading)
+            tokens
+                .font(isHeader ? small : RouterTheme.sans(12))
+                .foregroundStyle(isHeader ? RouterTheme.ink3 : RouterTheme.ink2)
+                .frame(width: 60, alignment: .trailing)
+            cached
+                .font(isHeader ? small : RouterTheme.sans(12))
+                .foregroundStyle(RouterTheme.ink3)
+                .frame(width: 46, alignment: .trailing)
         }
+        .lineLimit(1)
+        .truncationMode(.tail)
+        .monospacedDigit()
+        .frame(height: isHeader ? 20 : 26)
     }
+
+    private func latestTurns(session: RoutingSession?) -> [RoutingLogRecord] {
+        var turns: [RoutingLogRecord] = []
+        // The log is held newest first; take the first three served turns.
+        for record in monitor.records where !record.isClassifier {
+            if let session, record.sessionID != session.id { continue }
+            turns.append(record)
+            if turns.count == 3 { break }
+        }
+        return turns
+    }
+
+    private func cachedShare(_ record: RoutingLogRecord) -> String {
+        guard record.tokens.prompt > 0 else { return "—" }
+        return percent(Double(record.tokens.cached) / Double(record.tokens.prompt)) + "%"
+    }
+
+    private func card<Content: View>(
+        title: String, hint: String, accessory: AnyView? = nil, @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 9) {
+                Text(title)
+                    .font(RouterTheme.sans(13, .semibold))
+                    .foregroundStyle(RouterTheme.ink)
+                Text(hint)
+                    .font(RouterTheme.sans(11.5))
+                    .foregroundStyle(RouterTheme.ink3)
+                    .lineLimit(1)
+                Spacer(minLength: 6)
+                accessory
+            }
+            content()
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(RouterTheme.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(RouterTheme.line, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func seconds(_ milliseconds: Double) -> String {
+        String(format: milliseconds >= 100_000 ? "%.0f" : "%.1f", milliseconds / 1_000)
+    }
+
+    // MARK: - Panels
 
     /// Combined models traffic and proxy lifetime counters panel.
     private func modelsAndProxyPanel(_ metrics: RoutingMetrics) -> some View {

@@ -18,7 +18,7 @@ package final class RoutingMonitor {
         package var title: String {
             switch self {
             case .overview: "Overview"
-            case .statistics: "Statistics"
+            case .statistics: "Activity"
             case .requests: "Requests"
             }
         }
@@ -57,7 +57,8 @@ package final class RoutingMonitor {
     package var filter: RequestFilter = .all
     package var selectedRecordID: Int?
 
-    package private(set) var stats: RoutingStats?
+    // Settable inside the module so fixture renders can show proxy counters.
+    package internal(set) var stats: RoutingStats?
     package private(set) var statsError: String?
     /// The log's tail narrowed to the current routing run, so every pane
     /// describes the run the user just started rather than the log's history.
