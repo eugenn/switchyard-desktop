@@ -4,6 +4,60 @@ import TOMLKit
 /// Checks only ownership of generated TOML tables. Switchyard validates every
 /// algorithm field, threshold, prompt contract and target reference itself.
 package enum NativeRoutingOptions {
+    package static let planExecuteReviewMessage =
+        "Plan → execute now uses Stage. This saved route needs manual migration: "
+        + "judged handoff, handoff_prompt and planner_reasoning_as_text have no exact Stage equivalent. "
+        + "Review the route options or restore the native preset."
+
+    package static func needsPlanExecuteReview(_ profile: RoutingProfile) -> Bool {
+        guard let options = profile.nativeRouteOptions,
+              let document = try? TOMLTable(string: "[routes.main]\n" + options),
+              let route = document["routes"]?.table?["main"]?.table else { return false }
+        return containsRemovedPlanExecute(route)
+    }
+
+    /// Migrate the removed edit-triggered preset without discarding custom
+    /// fields. Judged handoff and reasoning conversion have no Stage equivalent;
+    /// retain those bodies so validation can explain what needs manual review.
+    package static func migrateLegacyPlanExecute(in profile: inout RoutingProfile) {
+        guard let options = profile.nativeRouteOptions,
+              let document = try? TOMLTable(string: "[routes.main]\n" + options),
+              let route = document["routes"]?.table?["main"]?.table else { return }
+        var changed = false
+        func migrate(_ table: TOMLTable) {
+            for key in table.keys {
+                if let child = table[key]?.table { migrate(child) }
+            }
+            guard table["type"]?.string == "plan_execute",
+                  table["execution_trigger"] == nil || table["execution_trigger"]?.string == "edit",
+                  table["judge"] == nil, table["handoff_prompt"] == nil,
+                  table["planner_reasoning_as_text"] == nil || table["planner_reasoning_as_text"]?.bool == false
+            else { return }
+            changed = true
+            table["type"] = "stage_router"
+            table["picker"] = "capable_first"
+            table["confidence_threshold"] = 0.0
+            table["capable_hold_turns"] = 0
+            table["efficient_hold_turns"] = -1
+            table["capable_system_prompt"] = table["planning_prompt"]?.string
+                ?? "Inspect the task and plan before modifying files."
+            for key in ["planning_prompt", "execution_trigger", "planner_reasoning_as_text"] {
+                table.remove(at: key)
+            }
+        }
+        guard options.contains("plan_execute") else { return }
+        migrate(route)
+        guard changed else { return }
+        profile.nativeRouteOptions = body(route, path: ["routes", "main"])
+    }
+
+    private static func containsRemovedPlanExecute(_ table: TOMLTable) -> Bool {
+        table["type"]?.string == "plan_execute"
+            || table.keys.contains { key in
+                table[key]?.table.map(containsRemovedPlanExecute) ?? false
+            }
+    }
+
     /// Older app builds wrote this client preference into the server route.
     /// Move it out on restore without changing prompts or nested route fields.
     package static func migrateLegacyReasoningSummaries(in profile: inout RoutingProfile) {
@@ -68,6 +122,10 @@ package enum NativeRoutingOptions {
         if let options = profile.nativeRouteOptions {
             do {
                 let document = try TOMLTable(string: "[routes.main]\n" + options)
+                if let route = document["routes"]?.table?["main"]?.table,
+                   containsRemovedPlanExecute(route) {
+                    return [planExecuteReviewMessage]
+                }
                 guard Set(document.keys) == ["routes"],
                       let routes = document["routes"]?.table,
                       Set(routes.keys) == ["main"],

@@ -164,6 +164,7 @@ package struct SavedRoutingSetup: Codable, Equatable, Sendable {
         // Preserve the old opt-out as a client setting, removing the server key.
         profile.advertisesReasoningSummaries = route.reasoning_summaries ?? true
         NativeRoutingOptions.migrateLegacyReasoningSummaries(in: &profile)
+        NativeRoutingOptions.migrateLegacyPlanExecute(in: &profile)
         recoverGeneratedDescriptions(in: &profile)
 
         var models = generatedTargets.enumerated().map { index, target in
@@ -186,7 +187,10 @@ package struct SavedRoutingSetup: Codable, Equatable, Sendable {
             binaryPathOverride: "",
             savedAt: Date()
         )
-        guard setup.isUsable else { throw MigrationFailure.incompleteRoute }
+        // Keep an unsupported old handoff available in the editor for review.
+        guard setup.isUsable || NativeRoutingOptions.needsPlanExecuteReview(profile) else {
+            throw MigrationFailure.incompleteRoute
+        }
         return setup
     }
 

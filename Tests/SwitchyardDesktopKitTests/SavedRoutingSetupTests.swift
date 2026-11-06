@@ -506,3 +506,46 @@ private func writtenConfig(_ profile: RoutingProfile) throws -> URL {
     #expect(decoded.tiers.allSatisfy { decoded.role(of: $0) != nil })
     #expect(!decoded.roles.targets.contains { $0.isBuiltIn })
 }
+
+@MainActor
+@Test func obsoleteHandoffStaysSavedAndEditableForMigration() throws {
+    let directory = UserDataLocations.testSandbox.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    var setup = reusableSetup()
+    setup.profile.algorithm = .planExecute
+    setup.profile.nativeRouteOptions = """
+    type = "plan_execute"
+    efficient_target = "efficient"
+    capable_target = "capable"
+    handoff_prompt = "Preserve this instruction."
+    """
+    let store = MemorySavedSetupStore(setup)
+    let model = WizardModel(
+        routingConfigPath: directory.appendingPathComponent("routes.toml"),
+        codexConfigPath: directory.appendingPathComponent("codex.toml"),
+        codexProfilePath: directory.appendingPathComponent("profile.toml"),
+        sessionStore: MemoryActiveSessionStore(),
+        savedSetupStore: store,
+        roleLibraryStore: RoleLibraryStore(fileURL: directory.appendingPathComponent("roles.json")),
+        preferencesStore: AppPreferencesStore(fileURL: directory.appendingPathComponent("preferences.json")),
+        setupReader: SavedSetupReader(),
+        modelDiscovery: SavedSetupDiscovery(setup.discoveredModels),
+        restoreSavedSetup: true
+    )
+    #expect(model.step == .tiers)
+    #expect(model.profile.nativeRouteOptions == setup.profile.nativeRouteOptions)
+    #expect(model.savedSetupWarning?.contains("manual migration") == true)
+    #expect(model.hasSavedSetup)
+    #expect(!model.profile.isValid)
+    #expect(store.setup == setup)
+
+    let path = directory.appendingPathComponent("routes.toml")
+    let current = try SwitchyardConfigWriter.render(profile: reusableSetup().profile)
+    let prefix = try #require(current.components(separatedBy: "[routes.main]").first)
+    try (prefix + "[routes.main]\nid = \"switchyard-desktop\"\n" + (setup.profile.nativeRouteOptions ?? ""))
+        .write(to: path, atomically: true, encoding: .utf8)
+    let migrated = try SavedRoutingSetup.migrateGeneratedConfig(from: path)
+    #expect(NativeRoutingOptions.needsPlanExecuteReview(migrated.profile))
+    #expect(!migrated.isUsable)
+}

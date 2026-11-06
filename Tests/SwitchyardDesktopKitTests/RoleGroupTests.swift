@@ -109,10 +109,10 @@ private func groupFixture() throws -> RoleLibrary {
     #expect(clients["judge_litellm"]?.table?["base_url"]?.string == "http://127.0.0.1:4101/v1")
     let judge = try #require(profile.judgeTargetName)
     #expect(targets[judge]?.table?["llm_client"]?.string == "judge_litellm")
-    #expect(targets[judge]?.table?["id"]?.string == "judge-gpt-5.6-luna")
+    #expect(targets[judge]?.table?["id"]?.string == "gpt-5.6-luna")
     #expect(profile.managedLiteLLMModels?.count == 1)
     #expect(profile.managedLiteLLMModels?.contains(
-        LiteLLMModel("judge-gpt-5.6-luna", servedBy: "gpt-5.6-luna")) == true)
+        LiteLLMModel("gpt-5.6-luna", servedBy: "gpt-5.6-luna")) == true)
     #expect(targets[judge]?.table?["reasoning_effort"]?.string == "low")
     #expect(targets[judge]?.table?["system_prompt"] == nil)
     // Opt-in output for the server's own dry-run; never a real user config.

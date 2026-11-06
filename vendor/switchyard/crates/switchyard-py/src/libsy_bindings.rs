@@ -84,8 +84,10 @@ fn request_from_python(
     headers: Option<HashMap<String, String>>,
 ) -> PyResult<Request> {
     let headers = headers.as_ref().map(header_map_from_python).transpose()?;
+    let mut llm_request = from_python(request)?;
+    switchyard_translation::normalize_compaction(&mut llm_request, headers.as_ref());
     Ok(Request {
-        llm_request: from_python(request)?,
+        llm_request,
         raw_request: None,
         metadata: headers.map(|headers| Metadata::from_headers(&headers)),
     })
@@ -164,6 +166,7 @@ struct PyEscalationClassifierConfig {
     contract: ClassifierContractConfig,
     judge: EscalationJudgeConfig,
     max_output_tokens: u64,
+    judge_deadline_ms: Option<u64>,
 }
 
 #[pymethods]
@@ -176,6 +179,7 @@ impl PyEscalationClassifierConfig {
         window_message_chars=500,
         deescalation=None,
         max_output_tokens=4096,
+        judge_deadline_ms=None,
         prompt=None,
         response_format_type="json_schema"
     ))]
@@ -187,6 +191,7 @@ impl PyEscalationClassifierConfig {
         window_message_chars: usize,
         deescalation: Option<Py<PyDeescalationConfig>>,
         max_output_tokens: u64,
+        judge_deadline_ms: Option<u64>,
         prompt: Option<String>,
         response_format_type: &str,
     ) -> PyResult<Self> {
@@ -201,6 +206,7 @@ impl PyEscalationClassifierConfig {
                     .transpose()?,
             },
             max_output_tokens,
+            judge_deadline_ms,
         })
     }
 }
@@ -234,7 +240,8 @@ impl PyCustomClassifierConfig {
         session_affinity=false,
         message_hash_fallback=false,
         recent_turn_window=None,
-        max_output_tokens=4096
+        max_output_tokens=4096,
+        judge_deadline_ms=None
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -245,6 +252,7 @@ impl PyCustomClassifierConfig {
         message_hash_fallback: bool,
         recent_turn_window: Option<usize>,
         max_output_tokens: u64,
+        judge_deadline_ms: Option<u64>,
     ) -> PyResult<Self> {
         // Convert the Python schema into serde JSON and pair it with the target-selector policy;
         // conversion failures propagate to Python through `PyResult`.
@@ -257,6 +265,7 @@ impl PyCustomClassifierConfig {
         inner.message_hash_fallback = message_hash_fallback;
         inner.recent_turn_window = recent_turn_window;
         inner.max_output_tokens = max_output_tokens;
+        inner.judge_deadline_ms = judge_deadline_ms;
         Ok(Self { inner })
     }
 }
@@ -295,6 +304,7 @@ impl PyLlmClassifierConfig {
                 contract: config.contract.clone(),
                 config: config.judge.clone(),
                 max_output_tokens: config.max_output_tokens,
+                judge_deadline_ms: config.judge_deadline_ms,
             },
         })
     }
@@ -319,27 +329,26 @@ impl PyLlmClassifierConfig {
 
 #[pymethods]
 impl PyTaskClassifierConfig {
-    /// Apply a cutoff to relative advantage or a custom candidate choice score.
+    /// Route capable when a decision model's choice probability exceeds a cutoff.
     #[staticmethod]
-    #[pyo3(signature = (*, cutoff, candidates, evidence, instructions=None, criteria=None))]
+    #[pyo3(signature = (*, cutoff=None, instructions=None, choices=None, apply_cutoff_to=None))]
     fn decision(
-        cutoff: f64,
-        candidates: BTreeMap<String, String>,
-        evidence: &Bound<'_, PyAny>,
-        instructions: Option<&Bound<'_, PyAny>>,
-        criteria: Option<&Bound<'_, PyAny>>,
+        cutoff: Option<f64>,
+        instructions: Option<String>,
+        choices: Option<&Bound<'_, PyAny>>,
+        apply_cutoff_to: Option<String>,
     ) -> PyResult<Self> {
+        let defaults = DecisionJudgeConfig::default();
         Ok(Self {
             inner: TaskClassifierConfig {
                 judge: CapabilityJudgeConfig::Decision(DecisionJudgeConfig {
                     cutoff,
-                    candidates: candidates
-                        .into_iter()
-                        .map(|(label, model)| (label, ModelId::from(model)))
-                        .collect(),
-                    evidence: from_python(evidence)?,
-                    instructions: instructions.map(from_python).transpose()?,
-                    criteria: criteria.map(from_python).transpose()?,
+                    instructions,
+                    choices: match choices {
+                        Some(choices) => from_python(choices)?,
+                        None => defaults.choices,
+                    },
+                    apply_cutoff_to: apply_cutoff_to.unwrap_or(defaults.apply_cutoff_to),
                 }),
                 ..TaskClassifierConfig::default()
             },
@@ -355,6 +364,7 @@ impl PyTaskClassifierConfig {
         message_hash_fallback=false,
         recent_turn_window=None,
         max_output_tokens=4096,
+        judge_deadline_ms=None,
         prompt=None,
         response_format_type="json_schema"
     ))]
@@ -366,6 +376,7 @@ impl PyTaskClassifierConfig {
         message_hash_fallback: bool,
         recent_turn_window: Option<usize>,
         max_output_tokens: u64,
+        judge_deadline_ms: Option<u64>,
         prompt: Option<String>,
         response_format_type: &str,
     ) -> PyResult<Self> {
@@ -377,6 +388,7 @@ impl PyTaskClassifierConfig {
                     unmatched_steps: DEFAULT_UNMATCHED_STEPS,
                     contract: classifier_contract(prompt, response_format_type)?,
                     max_output_tokens,
+                    judge_deadline_ms,
                 }),
                 fail_open: true,
                 classify_trigger: classify_trigger(session_affinity),

@@ -136,7 +136,10 @@ package enum SwitchyardConfigWriter {
         case .auto:
             return "type = \"auto\"\n" + tiers
         case .planExecute:
-            return "type = \"plan_execute\"\n" + tiers
+            return "type = \"stage_router\"\n" + tiers
+                + "picker = \"capable_first\"\nconfidence_threshold = 0.0\n"
+                + "capable_hold_turns = 0\nefficient_hold_turns = -1\n"
+                + "capable_system_prompt = \"Inspect the task and plan before modifying files.\"\n"
         case .vgr:
             return "type = \"vgr\"\n" + tiers + "mode = \"shadow\"\n"
         case .stageRouter:
@@ -332,17 +335,14 @@ package enum SwitchyardConfigWriter {
 
     /// What the `judge` group means when the judge has no target of its own.
     ///
-    /// Switchyard keeps one target per model id on a client, so a judge running
-    /// a model a target already serves runs as that target — with that target's
-    /// settings rather than the classifier role's.
+    /// A judge explicitly selecting an existing target uses that target’s settings.
     private static func judgeGroupNote(profile: RoutingProfile) -> String {
-        guard profile.judgeModelID != nil, profile.judgeTargetName == nil,
+        guard profile.judgeTargetName == nil,
               let shared = profile.judgeSharedTargetName else {
             return "# The judge's own candidates. Never a routing destination.\n"
         }
         return """
-            # The judge runs \(shared)'s model on the same client, so Switchyard keeps
-            # one target for both and the judge takes that target's settings.
+            # The judge explicitly selects \(shared) and uses that target's settings.
 
             """
     }

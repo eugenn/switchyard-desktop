@@ -172,6 +172,7 @@ package struct RoutingProfile: Codable, Equatable, Sendable {
         // The judge's template is the one role a saved profile never lacks.
         roles = savedRoles?.isEmpty == false ? savedRoles! : [RoutingRole.builtInClassifier]
         NativeRoutingOptions.migrateLegacyReasoningSummaries(in: &self)
+        NativeRoutingOptions.migrateLegacyPlanExecute(in: &self)
         // Before lifting roles, not after: a profile whose descriptions are
         // still frozen inside a captured route body reads as having none, and
         // the built-ins would go over the top of the user's own wording.
@@ -322,45 +323,13 @@ package struct RoutingProfile: Codable, Equatable, Sendable {
         return tiers.first { $0.id == classifierTargetID }?.assignedModel
     }
 
-    /// The route target that already serves the judge's model, if one does.
-    ///
-    /// Switchyard keeps one target per model id on a client, so a judge that
-    /// repeats a target's model either needs a model name of its own or has to
-    /// share that target.
-    package var judgeSharedTargetName: String? {
-        guard let classifierModel,
-              let index = allTargets.firstIndex(where: { $0.assignedModel == classifierModel }),
-              allTargetNames.indices.contains(index) else { return nil }
-        return allTargetNames[index]
-    }
+    /// An explicitly selected serving target can also act as the judge.
+    package var judgeSharedTargetName: String? { classifierTargetName }
 
-    /// Whether the bundled LiteLLM answers the judge, so this app can publish a
-    /// model name for it that no route target uses.
-    package var publishesJudgeModelName: Bool { routesJudgeThroughLiteLLM || usesManagedLiteLLM }
-
-    /// Whether a judge repeating a target's model asks for settings that target
-    /// does not have. Switchyard refuses two such targets on one client, so the
-    /// judge then needs a model name of its own.
-    package var judgeNeedsDistinctSettings: Bool {
-        guard let classifierModel,
-              let shared = allTargets.first(where: { $0.assignedModel == classifierModel }) else {
-            return false
-        }
-        return classifierRole?.effort != effort(of: shared)
-            || judgeNativeOptions != shared.nativeOptions
-            // The serving role's instructions must not replace the judge's
-            // classification contract, even when both use the same effort.
-            || role(of: shared)?.modelPrompt != nil
-    }
-
-    /// `[targets.<name>]` key of the judge-only target, when the judge needs a
-    /// client of its own. Kept distinct from every routable target name.
+    /// A judge model selection gets its own target even when a serving target
+    /// uses the same provider model. The server preserves settings by target name.
     package var judgeTargetName: String? {
         guard routesJudgeThroughLiteLLM || judgeModelID != nil else { return nil }
-        // An external upstream only serves the models it already knows, so a
-        // judge repeating a target's model there runs as that target rather
-        // than as a second target Switchyard would refuse.
-        if !publishesJudgeModelName, judgeSharedTargetName != nil { return nil }
         let taken = Set(allTargetNames)
         var candidate = "judge"
         var suffix = 2
@@ -511,22 +480,6 @@ package struct RoutingProfile: Codable, Equatable, Sendable {
         role.kind == .classifier || allTargets.contains { $0.roleID == role.id }
     }
 
-    /// Targets sharing a model that Switchyard cannot keep apart.
-    ///
-    /// It keeps one target per model id and llm client, so two that name the
-    /// same model must ask for the same thing. Roles make this easy to reach:
-    /// the same model under two roles is two different reasoning efforts, and
-    /// the server rejects the whole file rather than picking one.
-    package var conflictingDuplicateModels: [String] {
-        var settings: [String: Set<String>] = [:]
-        for tier in allTargets {
-            guard let model = tier.assignedModel else { continue }
-            let wanted = [effort(of: tier)?.rawValue ?? "", tier.nativeOptions ?? ""].joined(separator: "\u{1}")
-            settings[model, default: []].insert(wanted)
-        }
-        return settings.filter { $0.value.count > 1 }.keys.sorted()
-    }
-
     // MARK: - Validation
 
     /// Role-only errors shown while the user is configuring routing behavior.
@@ -562,10 +515,6 @@ package struct RoutingProfile: Codable, Equatable, Sendable {
                 "Choose which model decides the routing — a target's model, or one of its own."
             )
         }
-        if algorithm == .vgr, tiers.count == 2,
-           let efficient = tiers[0].assignedModel, efficient == tiers[1].assignedModel {
-            errors.append("Verification-gated routing requires distinct Efficient and Capable models.")
-        }
         if Set(allTargetNames).count != allTargetNames.count {
             errors.append("Native target keys must be unique.")
         }
@@ -573,15 +522,6 @@ package struct RoutingProfile: Codable, Equatable, Sendable {
 
         for tier in unassignedTiers {
             errors.append("No model assigned to the \(tier.displayName) role.")
-        }
-
-        let conflicting = conflictingDuplicateModels
-        if !conflicting.isEmpty {
-            errors.append(
-                "\(conflicting.formattedList()) is used by targets asking for different reasoning "
-                    + "or settings. Switchyard keeps one target per model, so give them the same "
-                    + "role settings or different models."
-            )
         }
 
         if algorithm == .llmClassifier, nativeRouteOptions == nil {
@@ -667,11 +607,10 @@ package struct RoutingProfile: Codable, Equatable, Sendable {
     /// Models the bundled LiteLLM must serve, or `nil` when it stays stopped.
     package var managedLiteLLMModels: [LiteLLMModel]? {
         if usesManagedLiteLLM {
-            let served = allTargets.compactMap(\.assignedModel)
+            var seen = Set<String>()
+            let served = allTargets.compactMap(\.assignedModel).filter { seen.insert($0).inserted }
             var models = served.map { LiteLLMModel($0) }
-            // A judge model of its own is served too, under the name the route
-            // asks for — its model's, or one of its own when a target already
-            // uses that model with other settings.
+            // Register each provider model once, including a judge-only model.
             if judgeModelID != nil, let classifierModel, let name = judgeModelName,
                !served.contains(name) {
                 models.append(LiteLLMModel(name, servedBy: classifierModel))
@@ -684,29 +623,8 @@ package struct RoutingProfile: Codable, Equatable, Sendable {
         return [LiteLLMModel(name, servedBy: classifierModel)]
     }
 
-    /// The model id written on the judge's own target.
-    ///
-    /// A judge on its own `[llm_clients]` entry needs a model id no route
-    /// target uses: Switchyard keys execution by model id and rejects one id
-    /// reached through two clients. LiteLLM publishes that name and calls the
-    /// real model behind it, so the judge keeps running the model the user
-    /// chose.
-    package var judgeModelName: String? {
-        guard let classifierModel else { return nil }
-        // A judge on the route's own client only needs a name of its own when
-        // a target already uses that model.
-        let needsOwnName = routesJudgeThroughLiteLLM
-            || (usesManagedLiteLLM && judgeSharedTargetName != nil && judgeNeedsDistinctSettings)
-        guard needsOwnName, publishesJudgeModelName else { return classifierModel }
-        let taken = Set(allTargets.compactMap(\.assignedModel))
-        var candidate = "judge-\(classifierModel)"
-        var suffix = 2
-        while taken.contains(candidate) {
-            candidate = "judge\(suffix)-\(classifierModel)"
-            suffix += 1
-        }
-        return candidate
-    }
+    /// Execution is keyed by target name, so the provider model needs no alias.
+    package var judgeModelName: String? { classifierModel }
 
     /// A loopback proxy such as a developer-run LiteLLM owns its own
     /// authentication. Only a direct remote upstream receives the credential

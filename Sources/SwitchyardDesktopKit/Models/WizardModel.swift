@@ -1409,7 +1409,8 @@ package final class WizardModel {
             } else {
                 return
             }
-            guard savedSetup.isUsable else {
+            let needsMigrationReview = NativeRoutingOptions.needsPlanExecuteReview(savedSetup.profile)
+            guard savedSetup.isUsable || needsMigrationReview else {
                 try savedSetupStore.clear()
                 savedSetupWarning = "The saved routing setup is no longer valid. Configure it again."
                 return
@@ -1426,7 +1427,12 @@ package final class WizardModel {
             // snapshot as the discovered list would compare the setup against
             // itself, and a model dropped from the account would stay assigned.
             hasSavedSetup = true
-            step = .confirm
+            if needsMigrationReview {
+                savedSetupWarning = NativeRoutingOptions.planExecuteReviewMessage
+                step = .tiers
+            } else {
+                step = .confirm
+            }
         } catch {
             try? savedSetupStore.clear()
             savedSetupWarning =

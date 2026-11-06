@@ -733,12 +733,12 @@ struct TierAssignmentStepView: View {
         )
     }
 
-    /// Two roles pointing at the same model means the router cannot change model.
+    /// Roles may share a model while keeping different target settings.
     private var duplicateModelWarning: String? {
         let assigned = model.profile.tiers.compactMap(\.assignedModel)
         guard assigned.count == model.profile.tiers.count else { return nil }
         guard Set(assigned).count < assigned.count else { return nil }
-        return "Some roles use the same model, so routing between them changes nothing."
+        return "Some roles use the same model. Their prompts and reasoning settings still apply separately."
     }
 }
 

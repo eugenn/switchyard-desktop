@@ -170,6 +170,9 @@ package final class RoutingLogReader: @unchecked Sendable {
               let dictionary = object as? [String: Any] else {
             return nil
         }
+        // New servers interleave routing outcomes with usage rows. An outcome
+        // describes a decision, not another model call or token charge.
+        guard dictionary["outcome"] as? [String: Any] == nil else { return nil }
 
         var flattened: [String: Any] = [:]
         flatten(dictionary, prefix: "", into: &flattened)

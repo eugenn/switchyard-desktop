@@ -185,8 +185,14 @@ def run_case(binary, directory, name, histories, expected, verdicts=(), judge_co
             expected_prompt = ('Efficient target: follow the settled plan.' if model == 'model-0'
                                else 'Capable target: diagnose before editing.')
             assert expected_prompt in json.dumps(call), (name, model, 'target prompt lost')
+    if name == 'stage_router-shared-model':
+        for call, effort, role in zip(Upstream.calls, ['low', 'high'], ['Efficient', 'Capable']):
+            assert call.get('reasoning', {}).get('effort') == effort, (name, call)
+            assert f'{role} role.' in json.dumps(call), (name, 'target prompt lost')
+            other = 'Capable' if role == 'Efficient' else 'Efficient'
+            assert f'{other} role.' not in json.dumps(call), (name, 'target prompt leaked')
     if name in ('plan_execute', 'plan-execute-custom-tool'):
-        planning_prompt = (PROMPTS / 'plan-execute/planning-system-prompt.md').read_text().strip()
+        planning_prompt = 'Inspect the task and plan before modifying files.'
         for call in Upstream.calls:
             instructions = call.get('instructions', '')
             assert (planning_prompt in instructions) == (call['model'] == 'model-1'), (
@@ -227,8 +233,14 @@ def exercise(binary, directory):
         for name, mutation in [('plan_execute', 'apply_patch'),
                                ('plan-execute-custom-tool', 'update_inventory')]:
             results.append(run_case(binary, directory, name,
-                [opening, continuation, opening + tool(mutation, 'Updated.'), opening],
-                ['model-1', 'model-1', 'model-0', 'model-0'], wire=wire))
+                [opening, continuation, opening + tool(mutation, 'Updated.'), fatal, opening],
+                ['model-1', 'model-1', 'model-0', 'model-0', 'model-0'], wire=wire))
+        results.append(run_case(binary, directory, 'stage_router-shared-model',
+            [opening, fatal], ['shared-model', 'shared-model'], wire=wire))
+        # Boundary: p_solve equal to base_threshold still selects Efficient.
+        results.append(run_case(binary, directory, 'capability', [opening] * 3,
+            ['model-1', 'model-0', 'model-0'], [forecast(.499), forecast(.5), forecast(.501)], 3,
+            'capability-classifier/prompt.md', wire))
         results.append(run_case(binary, directory, 'capability', [opening, continuation, followup],
             ['model-0', 'model-1', 'model-0'], [forecast(.95), forecast(.05), forecast(.95)], 3,
             'capability-classifier/prompt.md', wire))

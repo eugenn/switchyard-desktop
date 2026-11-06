@@ -97,7 +97,7 @@ func generatedRouteMigrationPreservesNativePolicyAndPrompts(_ algorithm: Routing
     let path = directory.appendingPathComponent("routes.toml")
     try SwitchyardConfigWriter.write(profile: profile, to: path)
     let restored = try SavedRoutingSetup.migrateGeneratedConfig(from: path)
-    #expect(restored.profile.algorithm == algorithm)
+    #expect(restored.profile.algorithm?.serverType == algorithm.serverType)
     let before = try TOMLTable(string: String(contentsOf: path, encoding: .utf8))
     let after = try TOMLTable(string: SwitchyardConfigWriter.render(profile: restored.profile))
     #expect(before["routes"]?.table?.convert(to: .json) == after["routes"]?.table?.convert(to: .json))
@@ -139,7 +139,25 @@ func nativeRoutingFixtures() throws {
         try SwitchyardConfigWriter.write(profile: profile, to: path)
         try SwitchyardConfigWriter.validate(configPath: path, binaryPath: binary)
     }
-    // New native Plan/Execute tool semantics must pass through the app's
+    // One provider model, two target identities: verify settings on the wire.
+    for algorithm in [RoutingAlgorithm.stageRouter, .vgr] {
+        var shared = parityProfile(algorithm)
+        shared.upstreamBaseURL = try #require(environment["SWITCHYARD_DESKTOP_PARITY_UPSTREAM"])
+        shared.tiers[0].modelID = "shared-model"
+        shared.tiers[1].modelID = "shared-model"
+        shared.tiers[0].nativeOptions = "reasoning_effort = \"low\"\nsystem_prompt = \"Efficient role.\""
+        shared.tiers[1].nativeOptions = "reasoning_effort = \"high\"\nsystem_prompt = \"Capable role.\""
+        if algorithm == .vgr {
+            // VGR also uses these targets for judging; serving-only prompts
+            // cannot be attached to a routing-only target.
+            shared.tiers[0].nativeOptions = "reasoning_effort = \"low\""
+            shared.tiers[1].nativeOptions = "reasoning_effort = \"high\""
+        }
+        let path = directory.appendingPathComponent("\(algorithm.rawValue)-shared-model.toml")
+        try SwitchyardConfigWriter.write(profile: shared, to: path)
+        try SwitchyardConfigWriter.validate(configPath: path, binaryPath: binary)
+    }
+    // Plan/Execute uses Stage tool semantics, passed through the app's
     // complete route body and trigger execution on a custom mutation tool.
     var planExecute = parityProfile(.planExecute)
     planExecute.upstreamBaseURL = try #require(environment["SWITCHYARD_DESKTOP_PARITY_UPSTREAM"])
@@ -166,7 +184,7 @@ func nativeRoutingFixtures() throws {
     #expect(profile.managedLiteLLMModels == nil)
 }
 
-@Test func verificationGatedRoutingStartsInShadowModeWithDistinctModels() throws {
+@Test func verificationGatedRoutingStartsInShadowModeWithDistinctTargets() throws {
     var profile = parityProfile(.vgr)
     let document = try TOMLTable(string: SwitchyardConfigWriter.render(profile: profile))
     let route = try #require(document["routes"]?.table?["main"]?.table)
@@ -176,7 +194,7 @@ func nativeRoutingFixtures() throws {
     #expect(route["efficient_target"]?.string == "efficient")
     #expect(route["capable_target"]?.string == "capable")
     profile.tiers[1].modelID = profile.tiers[0].modelID
-    #expect(!profile.isValid)
+    #expect(profile.isValid)
 }
 
 @Test func verificationGatedJudgesSurviveMigrationAndRequireExistingTargets() throws {
@@ -262,4 +280,68 @@ func nativeRoutingFixtures() throws {
     let before = try TOMLTable(string: SwitchyardConfigWriter.render(profile: profile))
     let after = try TOMLTable(string: SwitchyardConfigWriter.render(profile: restored.profile))
     #expect(before["routes"]?.table?.convert(to: .json) == after["routes"]?.table?.convert(to: .json))
+}
+
+@Test func legacyPlanExecuteMigratesToStageWithoutLosingCustomSettings() throws {
+    var profile = parityProfile(.planExecute)
+    profile.nativeRouteOptions = """
+    type = "plan_execute"
+    capable_target = "capable"
+    efficient_target = "efficient"
+    execution_trigger = "edit"
+    planning_prompt = "Inspect first.\nKeep the user's plan."
+    planner_reasoning_as_text = false
+    [routes.main.tool_semantics]
+    mutate = ["update_inventory"]
+    """.replacingOccurrences(of: "Inspect first.\nKeep", with: "Inspect first.\\nKeep")
+    let restored = try JSONDecoder().decode(RoutingProfile.self, from: JSONEncoder().encode(profile))
+    #expect(restored.isValid)
+    #expect(restored.algorithm == .planExecute)
+    let route = try #require(TOMLTable(string: SwitchyardConfigWriter.render(profile: restored))["routes"]?.table?["main"]?.table)
+    #expect(route["type"]?.string == "stage_router")
+    #expect(route["picker"]?.string == "capable_first")
+    #expect(route["confidence_threshold"]?.double == 0.0)
+    #expect(route["capable_hold_turns"]?.int == 0)
+    #expect(route["efficient_hold_turns"]?.int == -1)
+    #expect(route["capable_system_prompt"]?.string == "Inspect first.\nKeep the user's plan.")
+    #expect(route["planning_prompt"] == nil)
+    #expect(route["execution_trigger"] == nil)
+    #expect(route["tool_semantics"]?.table?["mutate"]?.array?[0]?.string == "update_inventory")
+    #expect(try JSONDecoder().decode(RoutingProfile.self, from: JSONEncoder().encode(restored)) == restored)
+
+    // Migration also covers routes.toml from an older app, not just JSON profiles.
+    let directory = UserDataLocations.testSandbox.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let path = directory.appendingPathComponent("routes.toml")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let current = try SwitchyardConfigWriter.render(profile: parityProfile(.planExecute))
+    let prefix = try #require(current.components(separatedBy: "[routes.main]").first)
+    try (prefix + "[routes.main]\nid = \"switchyard-desktop\"\n" + (profile.nativeRouteOptions ?? ""))
+        .write(to: path, atomically: true, encoding: .utf8)
+    let migrated = try SavedRoutingSetup.migrateGeneratedConfig(from: path)
+    #expect(migrated.isUsable)
+    #expect(migrated.profile.nativeRouteOptions == restored.nativeRouteOptions)
+}
+
+@Test(arguments: ["execution_trigger = \"judge\"", "handoff_prompt = \"Now execute\"", "planner_reasoning_as_text = true"])
+func unsupportedPlanExecuteSettingsRequireReview(_ setting: String) throws {
+    var profile = parityProfile(.planExecute)
+    profile.nativeRouteOptions = "type = \"plan_execute\"\ncapable_target = \"capable\"\nefficient_target = \"efficient\"\n" + setting
+    let restored = try JSONDecoder().decode(RoutingProfile.self, from: JSONEncoder().encode(profile))
+    #expect(!restored.isValid)
+    #expect(restored.roleValidationErrors.contains { $0.contains("manual migration") })
+    #expect(restored.nativeRouteOptions?.contains(setting) == true)
+}
+
+@Test func separateJudgeCanShareAnExternalModelWithoutLosingItsSettings() throws {
+    var profile = parityProfile(.capability)
+    profile.upstreamBaseURL = "http://127.0.0.1:4999/v1"
+    profile.judgeModelID = "model-0"
+    profile.judgeNativeOptions = "reasoning_effort = \"high\""
+    profile.tiers[0].nativeOptions = "reasoning_effort = \"low\"\nsystem_prompt = \"Serve the user.\""
+    let targets = try #require(TOMLTable(string: SwitchyardConfigWriter.render(profile: profile))["targets"]?.table)
+    #expect(targets["judge"]?.table?["id"]?.string == "model-0")
+    #expect(targets["judge"]?.table?["reasoning_effort"]?.string == "high")
+    #expect(targets["judge"]?.table?["system_prompt"] == nil)
+    #expect(targets["efficient"]?.table?["reasoning_effort"]?.string == "low")
 }

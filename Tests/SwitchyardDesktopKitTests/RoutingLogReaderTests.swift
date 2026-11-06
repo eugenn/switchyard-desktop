@@ -251,3 +251,17 @@ private func makeRoutingLog(_ lines: [String]) throws -> URL {
         }
     }
 }
+
+@Test func routingOutcomesDoNotBecomePhantomModelCalls() throws {
+    let log = try makeRoutingLog([
+        #"{"session_id":"s1","outcome":{"ts":"2026-11-06T12:00:00Z","route_id":"main","decision_source":"dimensions"}}"#,
+        #"{"session_id":"s1","model":"gpt-shared","target":"efficient","reasoning_effort":"low","tier":"","prompt_tokens":10,"completion_tokens":5}"#,
+        #"{"session_id":"s1","model":"gpt-shared","target":"judge","reasoning_effort":"high","tier":"classifier","prompt_tokens":8,"completion_tokens":2}"#,
+    ])
+    defer { try? FileManager.default.removeItem(at: log.deletingLastPathComponent()) }
+    let records = RoutingLogReader(url: log).recentRecords()
+    #expect(records.count == 2)
+    #expect(records.filter(\.isClassifier).count == 1)
+    #expect(records.last?.tier == "efficient")
+    #expect(records.last?.fields.contains { $0.name == "reasoning_effort" && $0.value == "low" } == true)
+}

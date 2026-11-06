@@ -21,6 +21,7 @@ package enum RoutingAlgorithm: String, CaseIterable, Codable, Equatable, Sendabl
     package var serverType: String {
         switch self {
         case .capability, .escalation: "llm_classifier"
+        case .planExecute: "stage_router"
         default: rawValue
         }
     }
@@ -54,7 +55,7 @@ package enum RoutingAlgorithm: String, CaseIterable, Codable, Equatable, Sendabl
         case .passthrough: "Always serves the selected target, with optional separate subagent routing."
         case .noop: "Returns OK without calling a model."
         case .prefillRouter: "Requires a server built with prefill-router, its Python dependencies and a trained checkpoint."
-        case .planExecute: "Plans on Capable, then permanently hands off to Efficient after the first edit or write."
+        case .planExecute: "Starts on Capable, then uses Stage signals to switch to Efficient and hold it for the session."
         case .vgr: "Verifies Efficient’s candidate answers. Starts in shadow mode, which serves Capable while measuring routing decisions."
         }
     }

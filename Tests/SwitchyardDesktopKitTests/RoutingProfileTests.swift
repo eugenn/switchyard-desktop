@@ -256,7 +256,7 @@ func savedNativeSummaryPreferenceMigratesToTheClient(_ enabled: Bool) throws {
     #expect(profile.routesJudgeThroughLiteLLM)
     #expect(profile.needsManagedLiteLLM)
     // Only the judge's own model has to be served locally.
-    #expect(profile.managedLiteLLMModels == [LiteLLMModel("judge-gpt-5-mini", servedBy: "gpt-5-mini")])
+    #expect(profile.managedLiteLLMModels == [LiteLLMModel("gpt-5-mini", servedBy: "gpt-5-mini")])
     #expect(profile.judgeTargetName == "judge")
 
     // A stage router makes no judge call at all.
@@ -537,25 +537,21 @@ private func roleProfile() -> RoutingProfile {
     #expect(try JSONDecoder().decode(RoutingProfile.self, from: data) == decoded)
 }
 
-/// Switchyard keeps one target per model id and rejects the whole file when two
-/// name the same model but ask for different things. Roles reach that in one
-/// click, so the wizard has to say it before the dry run does.
-@Test func twoTargetsOnOneModelUnderDifferentRolesIsRejected() {
+/// Target identity keeps settings separate even for one provider model.
+@Test func twoTargetsOnOneModelKeepDifferentRoles() throws {
     var profile = roleProfile()
     profile.tiers[0].modelID = "gpt-5.6-sol"
     profile.tiers[1].modelID = "gpt-5.6-sol"
     profile.classifierTargetID = profile.tiers[0].id
     profile.defaultTargetID = profile.tiers[1].id
-
-    #expect(profile.conflictingDuplicateModels == ["gpt-5.6-sol"])
-    #expect(profile.roleValidationErrors.contains { $0.contains("gpt-5.6-sol") })
-
-    // The same role on both asks for the same thing, which the server keeps.
-    let shared = try! #require(profile.roles.targets.first)
-    profile.assignRole(shared.id, to: profile.tiers[0].id)
-    profile.assignRole(shared.id, to: profile.tiers[1].id)
-
-    #expect(profile.conflictingDuplicateModels.isEmpty)
+    #expect(profile.isValid)
+    #expect(profile.managedLiteLLMModels == ["gpt-5.6-sol"])
+    let document = try TOMLTable(string: SwitchyardConfigWriter.render(profile: profile))
+    let targets = try #require(document["targets"]?.table)
+    let first = try #require(targets[profile.targetNames[0]]?.table)
+    let second = try #require(targets[profile.targetNames[1]]?.table)
+    #expect(first["id"]?.string == second["id"]?.string)
+    #expect(first["reasoning_effort"]?.string != second["reasoning_effort"]?.string)
 }
 
 /// The wizard reaches a classifier by picking the algorithm, not by building a

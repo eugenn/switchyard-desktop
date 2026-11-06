@@ -58,6 +58,9 @@ new = ["send_message"]
 `[routes.switchyard.classifier]` is required and takes the `stage_router` classifier fields.
 `classify_trigger` sets how often the judge runs: `user_turn` re-picks the tier
 whenever the user speaks, `new_session` picks once and holds it.
+Compaction continuations keep the selected profile. Translation recognizes native
+signals and known summary wrappers, then sets `is_compaction` in the IR. Stage reads
+`has_compaction` for its existing history check. Direct IR callers can set these flags.
 `[routes.switchyard.stage]` takes the stage settings, but accepts neither `picker`
 nor a second `classifier`. The outer classifier supplies the default tier.
 `confidence_threshold` remains an alias for `efficient_first_threshold`.
@@ -143,35 +146,36 @@ decision_client = "decisions"
 [routes.switchyard.classifier]
 target = "judge"
 classify_trigger = "user_turn"
-
-[routes.switchyard.classifier.decision]
-cutoff = 0.4
-candidates = { a = "strong", b = "weak" }
-evidence = { description = "Add task-relevant evidence comparing a and b." }
 ```
 
-Both candidates must be completion targets. The judge must be a decision target.
+The judge must be a decision target. Switchyard then uses the default decision
+settings. Add a `[routes.switchyard.classifier.decision]` table to change them.
 See the [decision client reference](../reference/toml_schema.md#decision_clientsname)
 for OpenAI Decisions configuration.
 
-By default, the classifier selects capable when `probabilities.advantage` exceeds `cutoff`.
+The judge receives the conversation messages and one choice question. The
+default choices are `capable` (start with the capable model) and `efficient`
+(start with the efficient model). The classifier selects capable when
+`probabilities.capable` is above `cutoff`. The default cutoff is `0.6`.
 Calibrate the cutoff for your tasks and models. Omit LLM-only settings such as
 `base_threshold`, `threshold_step` and `prompt` when using a decision model.
 On judge failure, the default is to retain the last classified tier or use
 efficient for a new session. Set `classifier.fail_open = false` to return the error.
 
-To ask a custom two-choice question, set `instructions` and `criteria` in the
-decision block. Criteria keys must exactly match the two candidate labels.
-The probability for the label mapped to the capable target must exceed `cutoff`
-to select that tier. This also works in standalone and Stage decision judges.
+To ask a custom question, set `instructions`, `choices`, and `apply_cutoff_to`
+in the decision block. The probability of the `apply_cutoff_to` choice must be
+above `cutoff` to select the capable tier. Any other result selects the
+efficient tier. This also works in standalone and Stage decision judges.
 
 ```toml
 [routes.switchyard.classifier.decision]
 cutoff = 0.92
-candidates = { capable_first = "strong", efficient_first = "weak" }
 instructions = "Choose the Stage profile best suited to the task."
-criteria = { capable_first = "Start capable", efficient_first = "Start efficient" }
-evidence = {}
+apply_cutoff_to = "capable_first"
+choices = [
+  { id = "capable_first", description = "Start capable" },
+  { id = "efficient_first", description = "Start efficient" },
+]
 ```
 
 ## Sessions

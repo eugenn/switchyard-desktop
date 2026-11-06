@@ -93,7 +93,7 @@ private var switchyardBinary: URL? {
         [routes.main.models]
         # Every selectable target, in last-resort fallback order.
         any = ["efficient", "balanced", "capable"]
-        # The judge's own candidates. Never a routing destination.
+        # The judge explicitly selects balanced and uses that target's settings.
         judge = ["balanced"]
         efficient = ["efficient"]
         balanced = ["balanced"]
@@ -404,11 +404,10 @@ private var directClassifierProfile: RoutingProfile {
     // The judge gets a loopback client of its own, and no caller credential.
     #expect(toml.contains("[llm_clients.judge_litellm]"))
     #expect(toml.contains(#"base_url = "\#(LiteLLMProcessManager.upstream)""#))
-    // The judge asks for the same model under a name of its own: Switchyard
-    // keys execution by model id and rejects one id on two clients.
+    // The judge keeps its own target/client while using the provider model ID.
     #expect(toml.contains("""
         [targets.judge]
-        id = "judge-gpt-5.6-terra"
+        id = "gpt-5.6-terra"
         llm_client = "judge_litellm"
         """))
     #expect(toml.contains(#"judge = ["judge"]"#))
@@ -451,7 +450,7 @@ private var directClassifierProfile: RoutingProfile {
         """))
     #expect(toml.contains("""
         [targets.judge]
-        id = "judge-gpt-5.6-terra"
+        id = "gpt-5.6-terra"
         llm_client = "judge_litellm"
         """))
     #expect(toml.contains(#"judge = ["judge"]"#))

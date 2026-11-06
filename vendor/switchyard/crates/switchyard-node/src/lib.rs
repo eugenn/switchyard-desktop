@@ -1,9 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Composite routing with caller-owned decision calls and state.
+//! Node bindings for routing algorithms and buffered JSON translation.
 
-use std::collections::BTreeMap;
+mod algorithm;
+mod translation;
+
 use std::future::ready;
 use std::sync::Arc;
 
@@ -12,11 +14,10 @@ use futures::future::{AbortHandle, Abortable};
 use napi_derive::napi;
 use parking_lot::Mutex;
 use serde::Deserialize;
-use serde_json::Value;
 use switchyard_libsy::{
     Algorithm, CallDecision, CapabilityJudgeConfig, ClassifyTrigger, CompositeJudgeConfig,
-    CompositeRouter, CompositeRouterConfig, DecisionJudgeConfig, LibsyError, PickerMode,
-    RuntimeModels, StageRouterConfig, State, Step, StepStream, TaskClassifierConfig,
+    CompositeRouter, CompositeRouterConfig, LibsyError, PickerMode, RuntimeModels,
+    StageRouterConfig, State, Step, StepStream, TaskClassifierConfig,
 };
 use switchyard_protocol::{
     Category, DecisionResponse, LlmClientError, LlmRequest, ModelId, Request,
@@ -56,24 +57,6 @@ struct Targets {
 struct ClassifierOptions {
     classify_trigger: ClassifyTrigger,
     fail_open: bool,
-    decision: DecisionOptions,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct DecisionOptions {
-    cutoff: f64,
-    candidates: BTreeMap<String, Candidate>,
-    evidence: Value,
-    instructions: Option<Value>,
-    criteria: Option<BTreeMap<String, Value>>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum Candidate {
-    Capable,
-    Efficient,
 }
 
 #[derive(Deserialize)]
@@ -105,31 +88,13 @@ impl NativeComposite {
                 "capable and efficient targets must differ",
             ));
         }
-        let decision = classifier.decision;
-        let candidates = decision
-            .candidates
-            .into_iter()
-            .map(|(id, tier)| {
-                let model = match tier {
-                    Candidate::Capable => &targets.capable,
-                    Candidate::Efficient => &targets.efficient,
-                };
-                (id, model.clone())
-            })
-            .collect();
         let mut stage_config =
             StageRouterConfig::new(PickerMode::EfficientFirst, stage.efficient_first_threshold);
         stage_config.capable_first_threshold = stage.capable_first_threshold;
         stage_config.efficient_hold_turns = stage.efficient_hold_turns;
         let router = CompositeRouter::new(CompositeRouterConfig {
             judge: CompositeJudgeConfig::Capability(TaskClassifierConfig {
-                judge: CapabilityJudgeConfig::Decision(DecisionJudgeConfig {
-                    cutoff: decision.cutoff,
-                    candidates,
-                    evidence: decision.evidence,
-                    instructions: decision.instructions,
-                    criteria: decision.criteria,
-                }),
+                judge: CapabilityJudgeConfig::Decision(Default::default()),
                 classify_trigger: classifier.classify_trigger,
                 fail_open: classifier.fail_open,
                 ..Default::default()
@@ -158,7 +123,7 @@ impl NativeComposite {
         messages_json: String,
         state_json: Option<String>,
     ) -> napi::Result<NativeRun> {
-        let request = Request {
+        let mut request = Request {
             llm_request: LlmRequest {
                 model: Some("switchyard/auto".into()),
                 messages: parse(&messages_json)?,
@@ -166,6 +131,7 @@ impl NativeComposite {
             },
             ..Default::default()
         };
+        switchyard_translation::normalize_compaction(&mut request.llm_request, None);
         let initial_state: State = state_json
             .as_deref()
             .map(parse)
