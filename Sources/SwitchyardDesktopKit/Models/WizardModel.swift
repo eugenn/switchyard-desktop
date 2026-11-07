@@ -921,7 +921,8 @@ package final class WizardModel {
             return ""
         }
         return (try? SwitchyardConfigWriter.render(
-            profile: profile, serverSupportsVision: readiness.serverSupportsVision
+            profile: profile, serverSupportsVision: readiness.serverSupportsVision,
+            serverSupportsCodexSessionForwarding: readiness.serverSupportsCodexSessionForwarding
         )) ?? ""
     }
 
@@ -1041,7 +1042,8 @@ package final class WizardModel {
             let configPath = try SwitchyardConfigWriter.write(
                 profile: profile,
                 to: routingConfigPath,
-                serverSupportsVision: freshReadiness.serverSupportsVision
+                serverSupportsVision: freshReadiness.serverSupportsVision,
+                serverSupportsCodexSessionForwarding: freshReadiness.serverSupportsCodexSessionForwarding
             )
 
             applyState = .working("Validating configuration…")

@@ -33,7 +33,9 @@ use crate::raw::RawResponse;
 
 // Caller headers safe to send when caller auth forwarding is disabled.
 // LiteLLM uses `x-litellm-session-id` to keep a conversation on one prompt cache.
-const ALLOWED_METADATA_HEADERS: &[&str] = &["x-request-id", "x-litellm-session-id"];
+const LITELLM_SESSION_HEADER: &str = "x-litellm-session-id";
+const CODEX_SESSION_HEADER: &str = "session-id";
+const ALLOWED_METADATA_HEADERS: &[&str] = &["x-request-id", LITELLM_SESSION_HEADER];
 
 // Headers tied to the inbound connection, destination, or body. The HTTP client
 // must rebuild these for the upstream request, even when forwarding auth.
@@ -1144,6 +1146,14 @@ fn forward_metadata_headers(
         }
         forwarded.append(name, value.clone());
     }
+    if backend.forwards_codex_session_id()
+        && !headers.contains_key(LITELLM_SESSION_HEADER)
+        && !is_non_forwardable_header(CODEX_SESSION_HEADER, headers)
+        && let Some(session_id) = headers.get(CODEX_SESSION_HEADER)
+        && !session_id.as_bytes().iter().all(u8::is_ascii_whitespace)
+    {
+        forwarded.insert(LITELLM_SESSION_HEADER, session_id.clone());
+    }
     builder.headers(forwarded)
 }
 
@@ -1726,6 +1736,7 @@ mod tests {
             base_url: base_url.to_string(),
             api_key: Some("secret".to_string()),
             forward_auth: false,
+            forward_codex_session_id: false,
             extra_headers: BTreeMap::new(),
             extra_body: BTreeMap::new(),
             omit_body_fields: BTreeSet::new(),
@@ -3881,6 +3892,49 @@ mod tests {
         let received = received.first().ok_or("expected one upstream request")?;
         assert!(!received.headers.contains_key("x-goog-api-key"));
         assert!(!received.headers.contains_key("x-custom-internal-secret"));
+        Ok(())
+    }
+
+    #[test]
+    fn maps_codex_session_id_only_for_enabled_backends() -> reqwest::Result<()> {
+        let url = "http://localhost:1/v1";
+        let client = reqwest::Client::new();
+        for (enabled, source, explicit, expected) in [
+            (false, Some("codex"), None, None),
+            (true, Some("codex"), None, Some("codex")),
+            (true, Some("codex"), Some("explicit"), Some("explicit")),
+            (true, Some(""), None, None),
+            (true, None, None, None),
+        ] {
+            let backend = Backend::OpenAiResponses(HttpBackendConfig {
+                forward_codex_session_id: enabled,
+                ..config(url)
+            });
+            let mut headers = HeaderMap::new();
+            if let Some(value) = source {
+                headers.insert(CODEX_SESSION_HEADER, http::HeaderValue::from_static(value));
+            }
+            if let Some(value) = explicit {
+                headers.insert(
+                    LITELLM_SESSION_HEADER,
+                    http::HeaderValue::from_static(value),
+                );
+            }
+            let metadata = Metadata {
+                http_headers: Some(headers),
+                ..Metadata::default()
+            };
+            let outbound =
+                forward_metadata_headers(client.post(url), Some(&metadata), &backend).build()?;
+            assert_eq!(
+                outbound
+                    .headers()
+                    .get(LITELLM_SESSION_HEADER)
+                    .and_then(|v| v.to_str().ok()),
+                expected
+            );
+            assert!(!outbound.headers().contains_key(CODEX_SESSION_HEADER));
+        }
         Ok(())
     }
 

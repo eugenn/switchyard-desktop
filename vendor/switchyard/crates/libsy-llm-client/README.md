@@ -69,6 +69,7 @@ fn build_client() -> switchyard_llm_client::Result<TranslatingLlmClient> {
         base_url: "https://api.openai.com/v1".to_string(),
         api_key: std::env::var("OPENAI_API_KEY").ok(),
         forward_auth: false,
+        forward_codex_session_id: false,
         extra_headers: BTreeMap::new(),
         extra_body: BTreeMap::new(),
         omit_body_fields: Default::default(),
@@ -246,6 +247,9 @@ fn build_multi_format_client(
   to keep a conversation on one prompt cache.
   With `forward_auth`, application headers are forwarded, while connection, destination,
   body, and the selected provider's owned headers are removed or rebuilt.
+- For a LiteLLM backend, `forward_codex_session_id = true` also copies an
+  inbound `session-id` when `x-litellm-session-id` is absent. The option defaults
+  to `false` and works independently of `forward_auth`.
 - `HttpBackendConfig::forward_auth` uses the caller's credential instead of the
   backend's configured key and forwards other application headers. OpenAI backends
   normalize `authorization`, `chatgpt-account-id`, and `x-openai-fedramp`.

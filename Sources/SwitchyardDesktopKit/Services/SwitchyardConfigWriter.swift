@@ -46,7 +46,10 @@ package enum SwitchyardConfigWriter {
     /// - Parameter serverSupportsVision: whether the resolved `switchyard-server`
     ///   understands the route's `vision` key. Older builds reject the whole
     ///   file when it appears, so an undetected server gets a text-only route.
-    package static func render(profile: RoutingProfile, serverSupportsVision: Bool = false) throws -> String {
+    package static func render(
+        profile: RoutingProfile, serverSupportsVision: Bool = false,
+        serverSupportsCodexSessionForwarding: Bool = false
+    ) throws -> String {
         guard profile.isValid else {
             throw Failure.invalidProfile(profile.validationErrors)
         }
@@ -67,6 +70,9 @@ package enum SwitchyardConfigWriter {
             forward_auth = \(profile.forwardsCallerCredential ? "true" : "false")
 
             """
+        if serverSupportsCodexSessionForwarding && profile.usesManagedLiteLLM {
+            toml += "forward_codex_session_id = true\n"
+        }
 
         if let jev = profile.jevClassifier, let judge = profile.judgeTargetName {
             toml += """
@@ -92,6 +98,9 @@ package enum SwitchyardConfigWriter {
                     forward_auth = false
 
                     """
+                if serverSupportsCodexSessionForwarding {
+                    toml += "forward_codex_session_id = true\n"
+                }
             }
             toml += """
 
@@ -508,9 +517,13 @@ package enum SwitchyardConfigWriter {
     package static func write(
         profile: RoutingProfile,
         to url: URL = SwitchyardConfigWriter.defaultConfigURL,
-        serverSupportsVision: Bool = false
+        serverSupportsVision: Bool = false,
+        serverSupportsCodexSessionForwarding: Bool = false
     ) throws -> URL {
-        let toml = try render(profile: profile, serverSupportsVision: serverSupportsVision)
+        let toml = try render(
+            profile: profile, serverSupportsVision: serverSupportsVision,
+            serverSupportsCodexSessionForwarding: serverSupportsCodexSessionForwarding
+        )
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(),
             withIntermediateDirectories: true

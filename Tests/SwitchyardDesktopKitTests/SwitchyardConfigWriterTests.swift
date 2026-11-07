@@ -46,6 +46,24 @@ private var switchyardBinary: URL? {
 
 }
 
+@Test func codexSessionForwardingRequiresBothManagedLiteLLMAndServerSupport() throws {
+    for (upstream, supported, expected) in [
+        (profile.upstreamBaseURL, true, true),
+        (profile.upstreamBaseURL, false, false),
+        ("http://127.0.0.1:4001/v1", true, false),
+    ] {
+        var candidate = profile
+        candidate.upstreamBaseURL = upstream
+        let rendered = try SwitchyardConfigWriter.render(
+            profile: candidate, serverSupportsCodexSessionForwarding: supported
+        )
+        let document = try TOMLTable(string: rendered)
+        let client = try #require(document["llm_clients"]?.table?[candidate.provider.clientName]?.table)
+        #expect(client["forward_codex_session_id"]?.bool == (expected ? true : nil))
+        #expect(client["forward_auth"]?.bool == false)
+    }
+}
+
 @Test func renderReflectsACustomUpstreamAndRouteID() throws {
     var custom = profile
     custom.upstreamBaseURL = "http://127.0.0.1:4001/v1"

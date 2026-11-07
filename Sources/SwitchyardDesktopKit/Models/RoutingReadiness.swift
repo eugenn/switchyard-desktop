@@ -34,6 +34,7 @@ package struct RoutingReadiness: Equatable, Sendable {
     /// Whether the resolved server takes the route `vision` key. False until a
     /// binary resolves, so an unknown server never gets a config it rejects.
     package let serverSupportsVision: Bool
+    package let serverSupportsCodexSessionForwarding: Bool
     package let binary: ReadinessStatus
     package let generatedConfig: ReadinessStatus
     package let dryRun: ReadinessStatus
@@ -43,6 +44,7 @@ package struct RoutingReadiness: Equatable, Sendable {
 
     package init(
         routingConfigPath: URL, codexProfilePath: URL, resolvedBinaryPath: URL?, serverSupportsVision: Bool,
+        serverSupportsCodexSessionForwarding: Bool = false,
         binary: ReadinessStatus, generatedConfig: ReadinessStatus, dryRun: ReadinessStatus,
         codexProfile: ReadinessStatus, endpoint: ReadinessStatus, upstream: ReadinessStatus
     ) {
@@ -50,6 +52,7 @@ package struct RoutingReadiness: Equatable, Sendable {
         self.codexProfilePath = codexProfilePath
         self.resolvedBinaryPath = resolvedBinaryPath
         self.serverSupportsVision = serverSupportsVision
+        self.serverSupportsCodexSessionForwarding = serverSupportsCodexSessionForwarding
         self.binary = binary
         self.generatedConfig = generatedConfig
         self.dryRun = dryRun
@@ -180,12 +183,14 @@ package struct RoutingReadinessChecker: RoutingReadinessChecking {
         // Declared only when every target accepts images; whether the server
         // takes the key at all is settled by the dry-run below.
         let wantsVision = profile.advertisesImageInput
+        let wantsSessionForwarding = profile.needsManagedLiteLLM
 
         let generatedConfigStatus: ReadinessStatus
         let renderedConfig: String?
         do {
             renderedConfig = try SwitchyardConfigWriter.render(
-                profile: profile, serverSupportsVision: wantsVision
+                profile: profile, serverSupportsVision: wantsVision,
+                serverSupportsCodexSessionForwarding: wantsSessionForwarding
             )
             generatedConfigStatus = .passed("Generated configuration is valid.")
         } catch {
@@ -194,27 +199,41 @@ package struct RoutingReadinessChecker: RoutingReadinessChecking {
         }
 
         var supportsVision = false
+        var supportsSessionForwarding = false
         let dryRunStatus: ReadinessStatus
         if let binary, let renderedConfig {
             let attempt = dryRun(binaryPath: binary, renderedConfig: renderedConfig, environment: environment)
             if attempt.isPassed {
                 supportsVision = wantsVision
+                supportsSessionForwarding = wantsSessionForwarding
                 dryRunStatus = attempt
-            } else if wantsVision,
-                      let withoutVision = try? SwitchyardConfigWriter.render(
-                          profile: profile, serverSupportsVision: false
-                      ),
-                      dryRun(binaryPath: binary, renderedConfig: withoutVision, environment: environment).isPassed {
-                // The same file minus the `vision` key is accepted, so this is a
-                // switchyard-server build from before that key existed.
-                dryRunStatus = .passed(
-                    """
-                    switchyard-server accepted the generated configuration, without image \
-                    input: this build does not take the route `vision` key.
-                    """
-                )
             } else {
-                dryRunStatus = attempt
+                let visionOptions = wantsVision ? [true, false] : [false]
+                let sessionOptions = wantsSessionForwarding ? [true, false] : [false]
+                let fallbacks = visionOptions.flatMap { vision in
+                    sessionOptions.map { (vision: vision, session: $0) }
+                }.dropFirst()
+                var status = attempt
+                for fallback in fallbacks {
+                    guard let config = try? SwitchyardConfigWriter.render(
+                        profile: profile, serverSupportsVision: fallback.vision,
+                        serverSupportsCodexSessionForwarding: fallback.session
+                    ), dryRun(binaryPath: binary, renderedConfig: config, environment: environment).isPassed else {
+                        continue
+                    }
+                    supportsVision = fallback.vision
+                    supportsSessionForwarding = fallback.session
+                    var message = "switchyard-server accepted the generated configuration."
+                    if wantsVision && !supportsVision {
+                        message += " This build does not take the route `vision` key."
+                    }
+                    if wantsSessionForwarding && !supportsSessionForwarding {
+                        message += " This build does not support Codex session forwarding."
+                    }
+                    status = .passed(message)
+                    break
+                }
+                dryRunStatus = status
             }
         } else {
             dryRunStatus = .skipped(
@@ -262,6 +281,7 @@ package struct RoutingReadinessChecker: RoutingReadinessChecking {
             codexProfilePath: codexProfilePath,
             resolvedBinaryPath: binary,
             serverSupportsVision: supportsVision,
+            serverSupportsCodexSessionForwarding: supportsSessionForwarding,
             binary: binaryStatus,
             generatedConfig: generatedConfigStatus,
             dryRun: dryRunStatus,

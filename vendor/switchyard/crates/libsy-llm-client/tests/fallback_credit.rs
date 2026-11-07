@@ -142,6 +142,7 @@ async fn fallback_credit_retry_child() -> TestResult {
                 base_url: server.uri(),
                 api_key: None,
                 forward_auth: false,
+                forward_codex_session_id: false,
                 extra_headers: BTreeMap::from([("anthropic-beta".to_string(), beta.to_string())]),
                 extra_body: BTreeMap::new(),
                 omit_body_fields: BTreeSet::new(),

@@ -1295,6 +1295,8 @@ struct LlmClientConfig {
     #[serde(default)]
     forward_auth: bool,
     #[serde(default)]
+    forward_codex_session_id: bool,
+    #[serde(default)]
     extra_headers: BTreeMap<String, String>,
     #[serde(default = "default_max_retries")]
     max_retries: u32,
@@ -1415,6 +1417,7 @@ fn build_backend(
         base_url: config.base_url.as_str().to_string(),
         api_key,
         forward_auth: config.forward_auth,
+        forward_codex_session_id: config.forward_codex_session_id,
         extra_headers: config.extra_headers.clone(),
         extra_body: extra_body.clone(),
         omit_body_fields: omit_body_fields.clone(),

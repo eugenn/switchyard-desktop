@@ -63,6 +63,8 @@ pub struct HttpBackendConfig {
     /// Anthropic) unless they all use the same scheme, host, and port, such as one LLM
     /// gateway. Backends that send a configured key are not restricted.
     pub forward_auth: bool,
+    /// Copy an inbound `session-id` to `x-litellm-session-id` when the latter is absent.
+    pub forward_codex_session_id: bool,
     /// Custom headers added to every outbound call to this backend.
     ///
     /// Provider-owned headers are rejected so a static value cannot replace
@@ -95,6 +97,7 @@ impl fmt::Debug for HttpBackendConfig {
             .field("base_url", &self.base_url)
             .field("api_key", &self.api_key.as_ref().map(|_| "[REDACTED]"))
             .field("forward_auth", &self.forward_auth)
+            .field("forward_codex_session_id", &self.forward_codex_session_id)
             .field("extra_header_names", &self.extra_headers.keys())
             .field("extra_body_keys", &self.extra_body.keys())
             .field("omit_body_fields", &self.omit_body_fields)
@@ -311,6 +314,10 @@ impl Backend {
         builder
     }
 
+    pub(crate) fn forwards_codex_session_id(&self) -> bool {
+        self.config().forward_codex_session_id
+    }
+
     /// Custom per-backend headers to forward on every call.
     pub fn extra_headers(&self) -> &BTreeMap<String, String> {
         &self.config().extra_headers
@@ -456,6 +463,7 @@ mod tests {
             base_url: base_url.to_string(),
             api_key: Some("secret".to_string()),
             forward_auth: false,
+            forward_codex_session_id: false,
             extra_headers: BTreeMap::new(),
             extra_body: BTreeMap::new(),
             omit_body_fields: BTreeSet::new(),
