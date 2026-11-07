@@ -3,6 +3,7 @@
 - switchyard-desktop is a standalone macOS app distributed as a DMG, with its own bundled Switchyard server.
 - Ship one application target, `SwitchyardDesktopApp`, with one `switchyard-desktop.app` bundle and no edition selector.
 - All server development happens first in `../NVIDIA` (relative to this checkout).
+- Do not implement, commit, or push core changes in `../NVIDIA` or `eugenn/Switchyard` from desktop tasks. Record proposed core changes in a Markdown file only; the user manages core development and publication.
 - Never edit `vendor/switchyard` directly. Import changes with `scripts/update-switchyard.py` and keep `vendor/switchyard-source.json` with the snapshot.
 - The manifest records the maintained fork commit and integrated NVIDIA upstream commit separately. Dirty imports are development-only; public releases must pass `--verify --release --check-published`.
 - Keep external PR workflows on `pull_request` with read-only permissions and GitHub-hosted runners. Never expose signing credentials or account data to PR code.

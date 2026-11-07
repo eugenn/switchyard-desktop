@@ -5,6 +5,8 @@
 build/
 dist/
 .idea/
+.oil-ui/
+mockups/
 .cadence/
 .code-review-graph/
 .claude/
