@@ -1,145 +1,114 @@
 # switchyard-desktop
 
-Native macOS app for routing AI requests between models with NVIDIA Switchyard.
-The project's scope covers all providers supported by Switchyard. Codex is one
-example of a client integration, rather than a requirement of the underlying
-router. Configure models and routing, then review request statistics. Switchyard
-and the Python/LiteLLM runtime are bundled with the app.
+A desktop app that chooses which AI model handles a request. Use a lighter model
+for routine work and a more capable model when needed, without switching by hand.
+The app uses [NVIDIA Switchyard](https://github.com/NVIDIA-NeMo/Switchyard) through
+an independently maintained [core fork](https://github.com/eugenn/Switchyard).
+It is not affiliated with NVIDIA, OpenAI or Anthropic.
 
-This is an independent community project using a
-[maintained Switchyard fork](https://github.com/eugenn/Switchyard), based on
-[NVIDIA Switchyard](https://github.com/NVIDIA-NeMo/Switchyard). It is not affiliated
-with or endorsed by NVIDIA or OpenAI.
+The only application is now in [`desktop/`](desktop/README.md), built with Tauri,
+React and Rust. The old Swift application and its build scripts have been removed.
+**This is a development preview, not a release-ready installer.** Old DMGs from
+GitHub Releases contain the retired application, not the current code. Build and
+run from source using the instructions below.
 
-![Activity screen](images/ui.png)
+## What you can connect
 
-## Download
+| Integration | How it works | What you need |
+| --- | --- | --- |
+| Codex / ChatGPT | Codex sends requests to the local Switchyard server, which selects a model and calls the bundled LiteLLM gateway. | Codex CLI, account access to the chosen models, and a separate ChatGPT sign-in through the app. |
+| Claude Code | A Switchyard add-on selects between two models inside Claude Code. Claude Code handles sign-in and requests directly. | Claude Code 2.1.301+, mods enabled, a subscription sign-in and access to both models. macOS only; live-account testing still needed. |
+| Jev / TypeSafe | Optional service that helps choose the model; it does not write the final answer. | A TypeSafe API key. Classification requests are separate from your model usage. |
 
-[Download the DMG for Apple Silicon (arm64)](https://github.com/eugenn/switchyard-desktop/releases/download/v0.1.0-preview.3/switchyard-desktop-0.1.0-3-arm64-local.dmg)
-[![DMG downloads](https://img.shields.io/github/downloads/eugenn/switchyard-desktop/v0.1.0-preview.3/switchyard-desktop-0.1.0-3-arm64-local.dmg?label=DMG%20downloads&displayAssetName=false&color=blue)](https://github.com/eugenn/switchyard-desktop/releases/tag/v0.1.0-preview.3)
-— macOS 14 or later.
+Claude does **not** use the local Codex proxy: this does not provide a general
+Claude API endpoint backed by a subscription. Gemini has no account setup flow
+in this app yet. Supported models and usage limits depend on your provider.
 
-This is the **v0.1.0-preview.3 test prerelease**, ad-hoc signed without an Apple
-Developer ID signature or Apple notarization. An Intel DMG is not available for
-this preview. See the [release notes and known limitations](https://github.com/eugenn/switchyard-desktop/releases/tag/v0.1.0-preview.3)
-and the [SHA-256 checksum](https://github.com/eugenn/switchyard-desktop/releases/download/v0.1.0-preview.3/switchyard-desktop-0.1.0-3-arm64-local.dmg.sha256).
+## Run on macOS
 
-## Providers and clients
+You need macOS 14+, Node.js 22+, Rust stable, Xcode Command Line Tools, Python 3
+and `uv`. The bundled Switchyard source also needs the toolchain specified in
+`vendor/switchyard/rust-toolchain.toml`.
 
-Switchyard connects routes to upstream model providers; applications such as
-Codex send requests to those routes. Provider credentials, available models, and
-API compatibility depend on the chosen upstream and client. See the
-[bundled Switchyard documentation](vendor/switchyard/README.md) for the core's
-capabilities and configuration.
+From the repository root, open Terminal and run:
 
-**Current preview limitation:** the desktop setup wizard currently configures
-the Codex/ChatGPT integration. Anthropic Claude and Google Gemini are not yet
-selectable in the wizard. Switchyard's broader provider support does not mean
-every provider already has a setup flow in this preview.
+```sh
+cd desktop
+npm ci
+npm run runtime
+npm run desktop
+```
 
-## Install and launch
+The first preparation builds Switchyard and bundles Python/LiteLLM. It can take
+some time and requires dependency downloads. The app does not install packages
+when it starts. If a prepared runtime already exists, the preparation command
+refuses to replace it; see [runtime preparation](desktop/README.md#run-on-macos).
 
-1. Download and open the DMG above, drag **switchyard-desktop.app** to
-   **Applications**, and launch it. If macOS blocks the preview, follow
-   [Opening the unnotarized preview](#opening-the-unnotarized-preview) below.
-2. Open **Routing config** to configure a route. The example below walks through
-   the integration available in the current preview.
+`npm run dev` only opens a browser preview. Account sign-in, routing and other
+native actions are disabled there. Use `npm run desktop` for a working app.
 
-### Example: route Codex requests
+Windows setup is documented in [the application guide](desktop/README.md#windows-development).
+It still needs native build and runtime acceptance on Windows.
 
-For this example, install the Codex CLI and sign in with access to the models
-you want to use. These requirements apply to this integration.
+## Start routing Codex
 
-1. In **Codex account**, discover your available models.
-2. In **Routing**, choose an algorithm and assign models and roles.
-3. In **Review & start**, review the configuration and start routing. Follow the
-   ChatGPT sign-in instructions if prompted.
-4. Run Codex through the route:
+1. Install Codex CLI separately and sign in to the account you want to use.
+2. In the app's **Routing** page, discover the models available to your account.
+3. Choose a routing strategy and assign models. Review the generated configuration.
+4. Complete the ChatGPT sign-in when needed, save your settings and start routing.
+5. In your project folder, run:
 
    ```sh
    codex --profile switch
    ```
 
-Keep the app running while using the route. Use **Stop routing** when finished.
+Keep the app running while using this route. Stop routing in the app when done.
+The app temporarily creates `CODEX_HOME/switch.config.toml`; it does not rewrite
+`config.toml` or overwrite an unrelated profile. A stale Switchyard profile or
+a file containing only Codex UI state can be replaced on Start. An occupied port is
+reported rather than freed by stopping someone else's process.
 
-### Use Jev as the classifier (source builds)
+## Use Claude without an API key
 
-TypeSafe provides the Jev classifier. You need a TypeSafe account and an API
-key from [typesafe.ai](https://typesafe.ai/) before you start. Sign in to your
-TypeSafe account, open its API key settings, and create a key. Copy it somewhere
-safe temporarily; treat it like a password and do not share it.
+Claude Code is Anthropic's program for working with code in Terminal, separate
+from the Claude website and desktop app. Sign in through Claude Code, choose two
+models in **Routing > Set up Claude**, then prepare and run the launch command
+shown by the app. Preparing the command does not start Claude Code automatically.
 
-1. Choose **Custom classifier** and assign models and descriptions to your roles,
-   or choose **Capability classifier** / **Composite** with Efficient and Capable.
-2. Under **Routing decisions**, choose **Jev / TypeSafe** as the routing judge.
-3. Paste the key you created in TypeSafe into the API key field and click
-   **Save in Keychain**. This saves the key in macOS Keychain, Apple's secure
-   password storage, so you do not have to paste it every time. You can change
-   or remove the saved key here or in Settings. The key is not included in saved
-   setups or generated configuration files.
-4. Keep `jev-latest` or enter a model ID available to your TypeSafe account.
-   For Capability and Composite, set the probability cutoff (default `0.6`); Capable is selected only when its
-   probability exceeds this value. Optional decision instructions must preserve
-   the meanings of `capable` and `efficient`. Custom classifier uses the server's
-   `direct` decision mode: Jev chooses among your role descriptions, without a cutoff.
-5. Review and start routing. Existing custom route options must be reviewed and
-   reset to the native preset before Jev can be enabled.
+Follow the [step-by-step Claude guide](desktop/README.md#claude-code-subscription-routing)
+for the one-time add-on build, account connection, model selection and pause commands.
+Your subscription's limits still apply; routing can also make classifier requests.
+Claude activity is not included in the app's HTTP proxy statistics.
 
-The bundled server calls TypeSafe's System One API directly. It receives the
-key through its environment, including during configuration validation; the
-desktop app does not register Jev with LiteLLM. Conversation context is sent to
-TypeSafe for classification and billed separately. Codex models still produce
-the answers. Advisor still requires an LLM judge.
+## Existing installations
 
-On a failed Jev call, Custom classifier uses its default target, Capability falls back to Capable; Composite retains its
-previous classified tier or starts Efficient for a new session. Key changes
-take effect the next time routing starts. Stop routing before revoking a key.
+Quit the retired app and stop its route before starting this one: both use ports
+4100/4101. Do not delete account files or app data to upgrade. This app keeps its
+settings under `switchyard-desktop/cross-platform` in the platform's application
+data folder. That directory name is retained to preserve existing preview data.
 
-### Opening the unnotarized preview
+To bring over an old routing setup, use **Import / export routing setup** and
+paste your exported JSON or legacy `saved-routing-setup.json`. Import creates a
+draft: review it and save explicitly. Accounts, tokens and request history are
+not transferred. Old setup imports are tested with 29 synthetic fixtures.
 
-Only approve the app if you trust this project and downloaded it from this
-repository's GitHub Releases. Apple has not notarized this test build.
+## Development and limitations
 
-1. In **Applications**, try opening **switchyard-desktop.app** once. If macOS
-   says the developer cannot be verified or Apple cannot check the app for
-   malicious software, dismiss the alert without moving the app to Trash.
-2. Open **System Settings → Privacy & Security** and scroll to **Security**.
-3. Find the message about **switchyard-desktop** and click **Open Anyway**.
-4. Confirm with **Open** when prompted. Subsequent launches normally work by
-   double-clicking the app.
+The routing editor supports 13 strategies and 18 built-in roles. Some server
+features, including Prefill, require an optional core build. Activity views,
+forced-quit recovery, OS integration, credential protection and installer
+acceptance still have open work. Removing the old app does not mean these gaps
+are complete. See [current status](docs/cross-platform.md).
 
-This adds an exception for this app. There is no need to disable Gatekeeper
-globally or run Terminal commands. If macOS instead reports malware or a damaged
-app, stop rather than bypassing that warning. On a managed Mac, your
-administrator may restrict these options.
-
-See Apple's [instructions for opening apps that haven't been notarized](https://support.apple.com/en-us/102445).
-
-## Run from source
-
-Requires Xcode, Python 3, `uv`, and the Rust toolchain specified in
-`vendor/switchyard/rust-toolchain.toml`. From the repository root:
-
-```sh
-export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
-./scripts/build-dev-app.sh release
-open build/switchyard-desktop.app
-```
-
-Then follow the setup steps above. The build downloads and bundles the required
-runtimes; nothing is installed at app startup.
-
-## Development and contributions
-
-The app builds from the checked-in core snapshot; a separate core checkout is
-only needed to develop server changes. Start with [CONTRIBUTING.md](CONTRIBUTING.md)
-and the [development workflow](docs/development.md). See also
-[core fork maintenance](docs/core-fork.md), [releases and provenance](docs/releases.md),
-and [GitHub maintainer settings](docs/github.md).
+- [Application setup and checks](desktop/README.md)
+- [Development workflow](docs/development.md)
+- [Contributing](CONTRIBUTING.md)
+- [Release requirements](docs/releases.md)
+- [Core snapshot ownership](docs/core-fork.md)
 
 ## License
 
-Original application code and project assets are licensed under
-[Apache-2.0](LICENSE). Third-party components retain their own licenses; see
-[NOTICE](NOTICE) and [third-party notices](Resources/THIRD-PARTY-NOTICES.txt).
+Original application code and assets are licensed under [Apache-2.0](LICENSE).
+Third-party components retain their own licenses; see [NOTICE](NOTICE),
+[dependency notices](Resources/THIRD-PARTY-NOTICES.txt) and `desktop/licenses/`.
 Report vulnerabilities using [SECURITY.md](SECURITY.md).

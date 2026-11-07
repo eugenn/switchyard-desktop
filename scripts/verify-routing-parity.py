@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-"""Exercise production Swift configurations against the bundled Switchyard, offline.
+"""Offline routing harness shared by Rust configuration and runtime checks.
 
-Optional --reference-server runs the same cases through the original server.
 Only disposable loopback ports and temporary files are used. No provider calls.
 """
 import argparse
@@ -286,33 +285,10 @@ def exercise(binary, directory):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--server', type=Path, default=ROOT / 'build/switchyard-target/release/switchyard-server')
-    parser.add_argument('--reference-server', type=Path)
-    args = parser.parse_args()
-    subprocess.run(['python3', str(ROOT / 'scripts/update-switchyard.py'), '--verify'], check=True)
-    mock = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Upstream)
-    threading.Thread(target=mock.serve_forever, daemon=True).start()
-    try:
-        with tempfile.TemporaryDirectory(prefix='switchyard-desktop-parity-') as temporary:
-            directory = Path(temporary)
-            env = {**os.environ, 'DEVELOPER_DIR': '/Applications/Xcode.app/Contents/Developer',
-                   'SWITCHYARD_DESKTOP_PARITY_FIXTURES': str(directory),
-                   'SWITCHYARD_DESKTOP_TEST_SERVER': str(args.server.resolve()),
-                   'SWITCHYARD_DESKTOP_PARITY_UPSTREAM': f'http://127.0.0.1:{mock.server_port}/v1'}
-            result = subprocess.run(['swift', 'test', '--filter', 'nativeRoutingFixtures'],
-                                    cwd=ROOT, env=env, capture_output=True, text=True)
-            if result.returncode:
-                raise RuntimeError(result.stdout + result.stderr)
-            actual = exercise(args.server.resolve(), directory)
-            if args.reference_server:
-                reference = exercise(args.reference_server.resolve(), directory)
-                assert actual == reference, 'Bundled and original server decisions differ'
-            print(json.dumps(actual, indent=2))
-            print(f'{len(actual)} routing scenarios passed; native prompts verified on the wire.')
-    finally:
-        mock.shutdown()
-        mock.server_close()
+    subprocess.run(
+        [os.sys.executable, str(ROOT / "desktop/scripts/verify-routing-parity.py")],
+        cwd=ROOT, check=True,
+    )
 
 
 if __name__ == '__main__':

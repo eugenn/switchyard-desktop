@@ -1,0 +1,15 @@
+[
+  {"value":"auto","label":"Auto","description":"Recommended server preset with Efficient and Capable targets.","shape":"pair","judge":false},
+  {"value":"stage_router","label":"Stage router","description":"Start efficient. Escalate when tool signals call for it.","shape":"pair","judge":false},
+  {"value":"capability","label":"Capability","description":"A judge forecasts the capacity each request needs.","shape":"pair","judge":true},
+  {"value":"llm_classifier","label":"Custom classifier","description":"Choose between role groups using your own judge policy.","shape":"variable","judge":true},
+  {"value":"escalation","label":"Escalation","description":"Judge completed efficient turns and failure evidence.","shape":"pair","judge":true},
+  {"value":"composite","label":"Composite","description":"Classifier chooses the starting tier; stage signals adjust it.","shape":"pair","judge":true},
+  {"value":"advisor","label":"Advisor","description":"An advisor reviews executor work and requests corrections.","shape":"single","judge":true},
+  {"value":"random","label":"Random","description":"Distribute requests among two to six targets.","shape":"variable","judge":false},
+  {"value":"passthrough","label":"Passthrough","description":"Send requests to one selected model.","shape":"single","judge":false},
+  {"value":"noop","label":"No-op","description":"Return OK without calling a model.","shape":"none","judge":false},
+  {"value":"prefill_router","label":"Prefill router","description":"Optional: requires a feature-enabled server and checkpoint.","shape":"variable","judge":false},
+  {"value":"plan_execute","label":"Plan → execute","description":"Plan with Capable, then hold execution on Efficient.","shape":"pair","judge":false},
+  {"value":"vgr","label":"Verification-gated routing","description":"Shadow mode serves Capable while evaluating Efficient.","shape":"pair","judge":false}
+]

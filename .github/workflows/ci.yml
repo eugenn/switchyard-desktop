@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  snapshot:
+    name: Snapshot checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify snapshot and source release gates
+        run: |
+          python3 scripts/update-switchyard.py --verify
+          python3 -m unittest discover -s scripts/tests -v
+          python3 -m unittest discover -s desktop/scripts -p 'test_*.py' -v
+          for script in scripts/*.sh; do sh -n "$script"; done
+          git diff --check
+
+  macos:
+    name: macOS tests
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Frontend tests and build
+        working-directory: desktop
+        run: |
+          node --version
+          npm ci
+          npm test
+          npm run build
+      - name: Rust tests including user-data isolation
+        working-directory: desktop
+        run: |
+          rustup toolchain install stable --profile minimal
+          cargo +stable test --locked -p switchyard-desktop-core
+          cargo +stable check --locked -p switchyard-desktop-shell

@@ -1,3 +1,9 @@
+# Historical validation: retired application
+
+These are historical reports for the removed Swift app. They do not validate
+the current Tauri client or a new installer. See [current checks](../desktop/README.md#validation)
+and [release gates](releases.md). Source removal occurred on November 7, 2026.
+
 # Local build validation
 
 ## Open-source preparation — 2026-10-21

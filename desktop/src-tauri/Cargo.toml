@@ -1,0 +1,15 @@
+[package]
+name = "switchyard-desktop-shell"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2.7.1", features = [] }
+
+[dependencies]
+switchyard-desktop-core = { path = "../core" }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tauri = { version = "2.12.1", features = [] }

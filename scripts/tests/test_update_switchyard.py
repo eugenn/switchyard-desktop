@@ -173,25 +173,12 @@ class SnapshotTests(unittest.TestCase):
         manifest = self.manifest()
         manifest['includes_tracked_worktree_changes'] = True
         (self.app / 'vendor/switchyard-source.json').write_text(json.dumps(manifest))
-        bundle = self.root / 'fixture.app'
-        resources = bundle / 'Contents/Resources'
-        resources.mkdir(parents=True)
-        (resources / 'switchyard-source.json').write_text(json.dumps(manifest))
-        dmg = self.root / 'fixture.dmg'
-        dmg.write_text('fixture only')
-        for name, arguments in (
-            ('create-release-dmg.sh', []),
-            ('package-app.sh', ['--output', str(self.root / 'unused.app'),
-                                '--signing-identity', 'Developer ID Application: Fixture',
-                                '--hardened-runtime']),
-            ('verify-release.sh', ['--app', str(bundle), '--dmg', str(dmg)]),
-        ):
-            script = self.app / 'scripts' / name
-            shutil.copy2(SCRIPT.parent / name, script)
-            result = subprocess.run(['sh', str(script), *arguments], capture_output=True, text=True)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn('dirty Switchyard snapshot', result.stderr)
-        self.assertFalse((self.root / 'unused.app').exists())
+        script = self.app / 'scripts/verify-release-source.sh'
+        shutil.copy2(SCRIPT.parent / script.name, script)
+        result = subprocess.run(['sh', str(script)], capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('dirty Switchyard snapshot', result.stderr)
+
 
 
 if __name__ == '__main__':

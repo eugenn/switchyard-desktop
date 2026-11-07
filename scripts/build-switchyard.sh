@@ -27,7 +27,7 @@ cp "$CARGO_TARGET_DIR/$HOST/release/switchyard-server" "$CARGO_TARGET_DIR/releas
 # cargo/ld's own linker-signed signature is rejected outright by taskgated on
 # some macOS versions ("Code Signature Invalid"), which kills the binary
 # before main() runs. Packaging re-signs the copy it bundles anyway
-# (sign-bundle.py); this ad-hoc re-sign is what lets this script's own smoke
+# with scripts/sign-bundle.py; this ad-hoc re-sign lets this script's own smoke
 # check, and a dev running the raw binary, launch it at all.
 codesign --sign - --force "$CARGO_TARGET_DIR/release/switchyard-server"
 "$CARGO_TARGET_DIR/release/switchyard-server" --config "$ROOT/configs/switchyard/smoke.toml" --dry-run

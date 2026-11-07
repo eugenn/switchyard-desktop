@@ -10,6 +10,10 @@ mockups/
 .cadence/
 .code-review-graph/
 .claude/
-/.github/
 __pycache__/
 *.pyc
+node_modules/
+desktop/target/
+desktop/src-tauri/gen/
+desktop/src-tauri/runtime/*
+!desktop/src-tauri/runtime/.gitkeep

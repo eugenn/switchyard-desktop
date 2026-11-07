@@ -1,16 +1,17 @@
 # Security reports
 
-Please report vulnerabilities privately through
+Report vulnerabilities privately through
 [GitHub private vulnerability reporting](https://github.com/eugenn/switchyard-desktop/security/advisories/new).
-Do not include credentials, Codex account files or personal inference transcripts.
-Provide the app version, macOS version, reproduction steps using synthetic data,
-and the expected and actual behavior.
+Do not include credentials, account files, private prompts or inference logs.
+Provide the app version or source commit, operating system, reproduction steps
+using synthetic data, and expected/actual behavior.
 
-We currently maintain the latest version on `main` and the latest published
-desktop release. Older releases may require an upgrade. This is a community
-project; there is no guaranteed response time.
+The active implementation is the Tauri client on `main`. Old Swift installers
+are retired and are not builds of the current source. This is a community
+project with no guaranteed response time; installer and credential-security
+acceptance remains incomplete. See [release gates](docs/releases.md).
 
-If the issue concerns the bundled core, include its commit from
-`Contents/Resources/switchyard-source.json`. We will assess whether it affects
-the maintained fork or NVIDIA upstream and coordinate disclosure as appropriate.
-Do not disclose a vulnerability through a public issue or PR before coordination.
+For a bundled-core issue, include the commit and provenance from
+`vendor/switchyard-source.json` or the prepared runtime's copy. We will coordinate
+with the maintained core fork or NVIDIA upstream as appropriate. Do not disclose
+a vulnerability in a public issue or PR before coordination.

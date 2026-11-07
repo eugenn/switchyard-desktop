@@ -1,0 +1,125 @@
+{
+  "binaryPathOverride" : "",
+  "discoveredModels" : [
+
+  ],
+  "profile" : {
+    "additionalTargets" : [
+
+    ],
+    "advertisesReasoningSummaries" : false,
+    "algorithm" : "stage_router",
+    "allowsLongContext" : true,
+    "classifyTrigger" : "every_request",
+    "host" : "127.0.0.1",
+    "imageCapableModelIDs" : [
+      "model-1",
+      "model-0"
+    ],
+    "modelContextWindows" : {
+      "model-0" : 128000,
+      "model-1" : 129000
+    },
+    "nativeRouteOptions" : "type = \"stage_router\"\ncapable_target = \"capable\"\nefficient_target = \"efficient\"\npicker = \"efficient_first\"\nconfidence_threshold = 0.5\nrecent_turn_window = 3\n",
+    "port" : 4100,
+    "provider" : "codex",
+    "roles" : [
+      {
+        "effort" : "low",
+        "groupIDs" : [
+
+        ],
+        "id" : "0D000000-0000-0000-0000-000000000000",
+        "isBuiltIn" : true,
+        "kind" : "classifier",
+        "name" : "Classifier",
+        "tags" : [
+
+        ],
+        "text" : "Choose the best group for this request.\n\n{{targets}}\n\nDo not answer or perform the request. Classify it.\nReply with this JSON object and nothing else:\n{\"decision\": {\"target\": \"<one of: {{target_names}}>\"}}"
+      },
+      {
+        "effort" : "low",
+        "groupIDs" : [
+
+        ],
+        "id" : "0D000000-0000-0000-0000-000000000001",
+        "isBuiltIn" : true,
+        "kind" : "target",
+        "name" : "Direct",
+        "systemPrompt" : "Carry out the change exactly as described, and nothing beside it. Read the named file before editing it, follow the conventions already in it, and keep the edit as small as the request allows. Do not refactor, rename or reformat code the request did not name. If the request turns out to rest on something that is not true of this code, say so in one line instead of guessing. Report what you changed and what you ran, and never claim a check passed unless it actually ran.",
+        "tags" : [
+          "coding",
+          "quick"
+        ],
+        "text" : "One named file or function, changed the way the request already describes: apply a stated fix, add a straightforward test, adjust copy or configuration, answer a question about code already in view. Not for changes that need a cause found first."
+      },
+      {
+        "effort" : "medium",
+        "groupIDs" : [
+
+        ],
+        "id" : "0D000000-0000-0000-0000-000000000002",
+        "isBuiltIn" : true,
+        "kind" : "target",
+        "name" : "Standard",
+        "systemPrompt" : "Work through ordinary feature and bug work end to end. Read the surrounding code before changing it, reuse the patterns already established there, and make the smallest complete change that satisfies the request. Keep unrelated behaviour intact. Verify what you changed with the project's own tests or a focused check, and if an assumption fails, diagnose the new evidence rather than repeating the attempt. Report what changed, what you verified, and anything you left undone.",
+        "tags" : [
+          "coding"
+        ],
+        "text" : "Ordinary feature and bug work over a handful of related files where the goal is clear but the steps are not: implement described behaviour, fix a bug that has a reproduction, extend existing tests. The right choice whenever a turn is routine but not trivial."
+      },
+      {
+        "effort" : "high",
+        "groupIDs" : [
+
+        ],
+        "id" : "0D000000-0000-0000-0000-000000000003",
+        "isBuiltIn" : true,
+        "kind" : "target",
+        "name" : "Investigative",
+        "systemPrompt" : "Find the cause before writing the fix. Gather the evidence the codebase and tool output actually give you, form a hypothesis, and test it rather than patching the symptom. Say which of your conclusions are measured and which are still assumptions. Once the cause is established, make the change that addresses it, keep the blast radius to what the cause requires, and verify the behaviour that was broken. Do not repeat an approach the session has already shown to fail, and never report a check as passing unless it ran.",
+        "tags" : [
+          "coding",
+          "debugging"
+        ],
+        "text" : "Work that must be investigated before it can be written: a failure with no reproduction, a regression of unknown origin, changes cutting across modules or public interfaces, non-trivial concurrency, performance or migration work, or a long tool-driven session that has to stay coherent."
+      },
+      {
+        "effort" : "xhigh",
+        "groupIDs" : [
+
+        ],
+        "id" : "0D000000-0000-0000-0000-000000000004",
+        "isBuiltIn" : true,
+        "kind" : "target",
+        "name" : "Architectural",
+        "systemPrompt" : "Decide the approach before committing to code. Name the constraints that actually bind, the options worth considering and the trade-off that settles between them, and say plainly where a requirement is ambiguous instead of resolving it silently. Weigh security, data integrity and the cost of being wrong. Then implement the choice you argued for, keeping the change coherent with the architecture already in place, and verify it. Distinguish what you measured from what you reasoned about.",
+        "tags" : [
+          "architecture",
+          "planning"
+        ],
+        "text" : "Turns where the right approach is itself in question: architecture and system design, ambiguous or conflicting requirements, decisions critical to security or data integrity, subtle bugs that survived an earlier attempt, and anything escalated after a weaker answer."
+      }
+    ],
+    "routeID" : "switchyard-desktop",
+    "tiers" : [
+      {
+        "id" : "DF962A6F-DE20-44BD-8BF4-BBA0FF405260",
+        "modelID" : "model-0",
+        "name" : "Efficient",
+        "nativeOptions" : "system_prompt = \"Preserve target 0.\"\nreasoning_effort = \"high\"",
+        "summary" : "Serves routine tool continuations when stage signals allow it."
+      },
+      {
+        "id" : "1A9331A7-7E3C-42F4-9362-47EAEEDB1C41",
+        "modelID" : "model-1",
+        "name" : "Capable",
+        "nativeOptions" : "system_prompt = \"Preserve target 1.\"\nreasoning_effort = \"high\"",
+        "summary" : "Handles escalation, error recovery and difficult turns."
+      }
+    ],
+    "upstreamBaseURL" : "http:\/\/127.0.0.1:4101\/v1"
+  },
+  "savedAt" : -978307200
+}

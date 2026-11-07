@@ -65,9 +65,8 @@ planning prompt.
 User-supplied native route bodies still replace the complete preset, preserving
 custom thresholds, prompts and deadlines. The new tuning documentation contains
 illustrative experiments, not measured defaults for this app's model pair; see
-[core tuning](../vendor/switchyard/docs/tuning/index.md). Decision-service clients
-and direct decision mode require service configuration that the desktop wizard
-does not currently generate. The new decision schema uses `choices` and
+[core tuning](../vendor/switchyard/docs/tuning/index.md). The Rust desktop generates Jev decision-service configuration for Capability,
+Custom and Composite routes. The new decision schema uses `choices` and
 `apply_cutoff_to` instead of `candidates`, `criteria`, and `evidence`.
 
 ### Target identity and logs
@@ -85,10 +84,8 @@ are additive. Raw request details retain `target` and `reasoning_effort`. Routin
 outcome envelopes are excluded from usage records so they do not inflate call
 counts or produce unknown-model entries.
 
-Validate with `scripts/build-switchyard.sh`, `swift test`, and
-`python3 scripts/verify-routing-parity.py`. The offline harness uses generated
-Swift configs, both Chat Completions and Responses, exact capability threshold
-boundaries, Stage handoff/holds, and different settings on one provider model.
-A local development bundle can be built before publication, but a public release
-must still pass `--verify --release --check-published`; the imported fork commit
-must be published separately before that check can pass.
+Validate with `scripts/build-switchyard.sh`, then run `cargo test --locked -p
+switchyard-desktop-core` and `python3 scripts/verify-routing-parity.py` from
+`desktop/`. The offline harness uses Rust-generated configurations and local
+mocks, not the removed application. Public releases still require
+`--verify --release --check-published`; see [release gates](releases.md).

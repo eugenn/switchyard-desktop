@@ -16,4 +16,4 @@ The application bundles Python, LiteLLM, and other dependencies. See
 Resources/THIRD-PARTY-NOTICES.txt and the license files in the distribution.
 
 This is an independent project, not affiliated with, endorsed by, or
-sponsored by NVIDIA or OpenAI. Their names and marks belong to their owners.
+sponsored by NVIDIA, OpenAI or Anthropic. Their names and marks belong to their owners.

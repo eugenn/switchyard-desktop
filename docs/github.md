@@ -28,8 +28,8 @@ self-approve. Use the normal review/check path for external contributions.
 `.github/workflows/ci.yml` runs on PRs targeting `main`, pushes to `main`, and manual
 dispatch. Required check names are stable and have no path filters. The snapshot
 job runs integrity checks, importer/release-gate regressions and shell syntax
-checks. The macOS job selects Xcode 26.3 on `macos-15`, runs Swift tests (including
-`UserDataLocationsTests`) and builds the single application product. It does not
+checks. The macOS job runs frontend tests/build, Rust core tests (including
+`user_data_locations` and legacy setup fixtures), and checks the Tauri shell. It does not
 notarize or publish binaries.
 
 GitHub Actions has read-only default workflow permissions and cannot approve PRs.
