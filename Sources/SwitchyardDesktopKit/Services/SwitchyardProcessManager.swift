@@ -175,7 +175,8 @@ package final class SwitchyardProcessManager {
         host: String = RoutingProfile.defaultHost,
         port: Int = RoutingProfile.defaultPort,
         routingLogPath: URL? = nil,
-        liteLLMModels: [LiteLLMModel]? = nil
+        liteLLMModels: [LiteLLMModel]? = nil,
+        environment: [String: String] = [:]
     ) async throws {
         guard !status.isRunning else { throw Failure.alreadyRunning }
         guard port != RoutingProfile.reservedPort else {
@@ -210,6 +211,7 @@ package final class SwitchyardProcessManager {
 
         let process = Process()
         process.executableURL = binaryPath
+        process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, supplied in supplied }
         var arguments = [
             "--config", configPath.path,
             "--host", host,
@@ -225,7 +227,7 @@ package final class SwitchyardProcessManager {
         process.arguments = arguments
         // Draining continuously matters as much as keeping the output: an
         // unread pipe fills at about 64 KB and blocks the server mid-write.
-        let recorder = ChildOutputRecorder(url: serverLogURL)
+        let recorder = ChildOutputRecorder(url: serverLogURL, redactingSecrets: Array(environment.values))
         recorder.begin(banner: "switchyard-server starting on \(host):\(port)")
         process.standardOutput = recorder.pipe
         process.standardError = recorder.pipe

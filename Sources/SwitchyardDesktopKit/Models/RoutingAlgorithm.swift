@@ -62,6 +62,9 @@ package enum RoutingAlgorithm: String, CaseIterable, Codable, Equatable, Sendabl
     package var requiresJudge: Bool {
         [.capability, .llmClassifier, .escalation, .composite, .advisor].contains(self)
     }
+    package var supportsJevClassifier: Bool {
+        self == .capability || self == .composite || self == .llmClassifier
+    }
     package var hasTierPair: Bool {
         [.auto, .stageRouter, .capability, .escalation, .composite, .planExecute, .vgr].contains(self)
     }

@@ -16,6 +16,7 @@ package struct RoutingProfile: Codable, Equatable, Sendable {
     package var nativeRouteOptions: String?
     package var judgeModelID: String?
     package var judgeNativeOptions: String?
+    package var jevClassifier: JevClassifierConfiguration?
     /// Advisor's review contract; separate from completion-target instructions.
     package var reviewerSystemPrompt: String?
     package var classifyTrigger: ClassifyTrigger = .everyRequest
@@ -99,6 +100,7 @@ package struct RoutingProfile: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
+        case jevClassifier
         case reviewerSystemPrompt
         case judgeModelID
         case judgeNativeOptions
@@ -132,6 +134,7 @@ package struct RoutingProfile: Codable, Equatable, Sendable {
 
         additionalTargets = try container.decodeIfPresent([TaskTier].self, forKey: .additionalTargets) ?? []
         judgeModelID = try container.decodeIfPresent(String.self, forKey: .judgeModelID)
+        jevClassifier = try container.decodeIfPresent(JevClassifierConfiguration.self, forKey: .jevClassifier)
         judgeNativeOptions = try container.decodeIfPresent(String.self, forKey: .judgeNativeOptions)
         reviewerSystemPrompt = try container.decodeIfPresent(String.self, forKey: .reviewerSystemPrompt)
         nativeRouteOptions = try container.decodeIfPresent(String.self, forKey: .nativeRouteOptions)
@@ -196,6 +199,7 @@ package struct RoutingProfile: Codable, Equatable, Sendable {
         try container.encodeIfPresent(reviewerSystemPrompt, forKey: .reviewerSystemPrompt)
         try container.encode(additionalTargets, forKey: .additionalTargets)
         try container.encodeIfPresent(judgeModelID, forKey: .judgeModelID)
+        try container.encodeIfPresent(jevClassifier, forKey: .jevClassifier)
         try container.encodeIfPresent(judgeNativeOptions, forKey: .judgeNativeOptions)
         try container.encodeIfPresent(nativeRouteOptions, forKey: .nativeRouteOptions)
         try container.encode(classifyTrigger, forKey: .classifyTrigger)
@@ -264,6 +268,7 @@ package struct RoutingProfile: Codable, Equatable, Sendable {
         nativeRouteOptions = nil
         additionalTargets = []
         judgeModelID = nil
+        jevClassifier = nil
         judgeNativeOptions = nil
         reviewerSystemPrompt = nil
         classifyTrigger = algorithm == .composite ? .userTurn : .everyRequest
@@ -318,6 +323,7 @@ package struct RoutingProfile: Codable, Equatable, Sendable {
 
     /// The model the judge itself runs on.
     package var classifierModel: String? {
+        if let jevClassifier { return jevClassifier.modelID }
         if let judgeModelID, !judgeModelID.isEmpty { return judgeModelID }
         guard let classifierTargetID else { return nil }
         return tiers.first { $0.id == classifierTargetID }?.assignedModel
@@ -329,7 +335,7 @@ package struct RoutingProfile: Codable, Equatable, Sendable {
     /// A judge model selection gets its own target even when a serving target
     /// uses the same provider model. The server preserves settings by target name.
     package var judgeTargetName: String? {
-        guard routesJudgeThroughLiteLLM || judgeModelID != nil else { return nil }
+        guard jevClassifier != nil || routesJudgeThroughLiteLLM || judgeModelID != nil else { return nil }
         let taken = Set(allTargetNames)
         var candidate = "judge"
         var suffix = 2
@@ -515,6 +521,24 @@ package struct RoutingProfile: Codable, Equatable, Sendable {
                 "Choose which model decides the routing — a target's model, or one of its own."
             )
         }
+        if let jevClassifier {
+            if !algorithm.supportsJevClassifier {
+                errors.append("Jev supports Custom classifier, Capability classifier and Composite routing.")
+            }
+            if jevClassifier.modelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                errors.append("Enter a Jev model ID.")
+            }
+            if algorithm != .llmClassifier,
+               !jevClassifier.cutoff.isFinite || !(0...1).contains(jevClassifier.cutoff) {
+                errors.append("Jev's probability cutoff must be between 0 and 1.")
+            }
+            if judgeModelID != nil || judgeNativeOptions != nil || classifierTargetID != nil {
+                errors.append("Jev must use its own decision target without LLM judge settings.")
+            }
+            if nativeRouteOptions != nil {
+                errors.append("Restore the native route preset before using Jev; custom route options are not applied to Jev.")
+            }
+        }
         if Set(allTargetNames).count != allTargetNames.count {
             errors.append("Native target keys must be unique.")
         }
@@ -527,7 +551,7 @@ package struct RoutingProfile: Codable, Equatable, Sendable {
         if algorithm == .llmClassifier, nativeRouteOptions == nil {
             // Without the marker the judge is asked to choose between groups it
             // was never shown, and every turn falls through to the default.
-            if let classifier = classifierRole, !classifier.rendersTargets {
+            if jevClassifier == nil, let classifier = classifierRole, !classifier.rendersTargets {
                 errors.append(
                     "The \(classifier.displayName) role must keep \(RoutingRole.targetsPlaceholder) "
                         + "where the group list belongs."
@@ -595,6 +619,7 @@ package struct RoutingProfile: Codable, Equatable, Sendable {
     /// profile keeps its served turns direct and sends only the judge there.
     package var routesJudgeThroughLiteLLM: Bool {
         provider == .codex
+            && jevClassifier == nil
             && forwardsCallerCredential
             && classifierModel != nil
     }
@@ -611,7 +636,7 @@ package struct RoutingProfile: Codable, Equatable, Sendable {
             let served = allTargets.compactMap(\.assignedModel).filter { seen.insert($0).inserted }
             var models = served.map { LiteLLMModel($0) }
             // Register each provider model once, including a judge-only model.
-            if judgeModelID != nil, let classifierModel, let name = judgeModelName,
+            if jevClassifier == nil, judgeModelID != nil, let classifierModel, let name = judgeModelName,
                !served.contains(name) {
                 models.append(LiteLLMModel(name, servedBy: classifierModel))
             }

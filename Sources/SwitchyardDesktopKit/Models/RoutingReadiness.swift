@@ -114,11 +114,25 @@ package struct RoutingReadiness: Equatable, Sendable {
 /// Makes preflight testable without starting a proxy or writing a Codex profile.
 package protocol RoutingReadinessChecking: Sendable {
     func check(
+        profile: RoutingProfile, binaryPathOverride: String, routingConfigPath: URL,
+        codexProfilePath: URL, environment: [String: String]
+    ) -> RoutingReadiness
+    func check(
         profile: RoutingProfile,
         binaryPathOverride: String,
         routingConfigPath: URL,
         codexProfilePath: URL
     ) -> RoutingReadiness
+}
+
+extension RoutingReadinessChecking {
+    package func check(
+        profile: RoutingProfile, binaryPathOverride: String, routingConfigPath: URL,
+        codexProfilePath: URL, environment: [String: String]
+    ) -> RoutingReadiness {
+        check(profile: profile, binaryPathOverride: binaryPathOverride,
+              routingConfigPath: routingConfigPath, codexProfilePath: codexProfilePath)
+    }
 }
 
 /// Default prerequisite checks for a direct-distribution installation.
@@ -147,6 +161,14 @@ package struct RoutingReadinessChecker: RoutingReadinessChecking {
         routingConfigPath: URL,
         codexProfilePath: URL
     ) -> RoutingReadiness {
+        check(profile: profile, binaryPathOverride: binaryPathOverride,
+              routingConfigPath: routingConfigPath, codexProfilePath: codexProfilePath, environment: [:])
+    }
+
+    package func check(
+        profile: RoutingProfile, binaryPathOverride: String, routingConfigPath: URL,
+        codexProfilePath: URL, environment: [String: String]
+    ) -> RoutingReadiness {
         let binary = locateBinary(binaryPathOverride)
         let binaryStatus: ReadinessStatus
         if let binary {
@@ -174,7 +196,7 @@ package struct RoutingReadinessChecker: RoutingReadinessChecking {
         var supportsVision = false
         let dryRunStatus: ReadinessStatus
         if let binary, let renderedConfig {
-            let attempt = dryRun(binaryPath: binary, renderedConfig: renderedConfig)
+            let attempt = dryRun(binaryPath: binary, renderedConfig: renderedConfig, environment: environment)
             if attempt.isPassed {
                 supportsVision = wantsVision
                 dryRunStatus = attempt
@@ -182,7 +204,7 @@ package struct RoutingReadinessChecker: RoutingReadinessChecking {
                       let withoutVision = try? SwitchyardConfigWriter.render(
                           profile: profile, serverSupportsVision: false
                       ),
-                      dryRun(binaryPath: binary, renderedConfig: withoutVision).isPassed {
+                      dryRun(binaryPath: binary, renderedConfig: withoutVision, environment: environment).isPassed {
                 // The same file minus the `vision` key is accepted, so this is a
                 // switchyard-server build from before that key existed.
                 dryRunStatus = .passed(
@@ -249,14 +271,14 @@ package struct RoutingReadinessChecker: RoutingReadinessChecking {
         )
     }
 
-    private func dryRun(binaryPath: URL, renderedConfig: String) -> ReadinessStatus {
+    private func dryRun(binaryPath: URL, renderedConfig: String, environment: [String: String]) -> ReadinessStatus {
         let temporaryConfig = FileManager.default.temporaryDirectory
             .appendingPathComponent("switchyard-desktop-preflight-\(UUID().uuidString).toml")
         defer { try? FileManager.default.removeItem(at: temporaryConfig) }
 
         do {
             try renderedConfig.write(to: temporaryConfig, atomically: true, encoding: .utf8)
-            try SwitchyardConfigWriter.validate(configPath: temporaryConfig, binaryPath: binaryPath)
+            try SwitchyardConfigWriter.validate(configPath: temporaryConfig, binaryPath: binaryPath, environment: environment)
             return .passed("switchyard-server accepted the generated configuration.")
         } catch {
             return .failed(Self.explained(error, binaryPath: binaryPath))

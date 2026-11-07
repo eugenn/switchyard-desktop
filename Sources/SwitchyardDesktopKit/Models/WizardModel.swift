@@ -199,6 +199,10 @@ package final class WizardModel {
     private let savedSetupStore: any SavedRoutingSetupStoring
     private let roleLibraryStore: any RoleLibraryStoring
     private let preferencesStore: any AppPreferencesStoring
+    private let jevAPIKeyStore: any JevAPIKeyStoring
+    package private(set) var hasJevAPIKey = false
+    package private(set) var jevAPIKeyError: String?
+    private var jevAPIKeyRevision = 0
     private let setupReader: any CodexSetupReading
     private let modelDiscovery: any CodexModelDiscovering
     private let cliVersionProbe: @Sendable () -> String?
@@ -216,6 +220,7 @@ package final class WizardModel {
         savedSetupStore: any SavedRoutingSetupStoring = SavedRoutingSetupStore(),
         roleLibraryStore: any RoleLibraryStoring = RoleLibraryStore(),
         preferencesStore: any AppPreferencesStoring = AppPreferencesStore(),
+        jevAPIKeyStore: any JevAPIKeyStoring = JevAPIKeyStore.standard(),
         setupReader: any CodexSetupReading = CodexSetupReader(),
         modelDiscovery: any CodexModelDiscovering = CodexModelDiscovery(),
         cliVersionProbe: @escaping @Sendable () -> String? = { CodexCLIProbe.version() },
@@ -232,6 +237,7 @@ package final class WizardModel {
         self.savedSetupStore = savedSetupStore
         self.roleLibraryStore = roleLibraryStore
         self.preferencesStore = preferencesStore
+        self.jevAPIKeyStore = jevAPIKeyStore
         // An unreadable file leaves the route as it was before the setting.
         self.allowsLongContext = (try? preferencesStore.load())?.allowsLongContext ?? true
         self.setupReader = setupReader
@@ -254,12 +260,74 @@ package final class WizardModel {
                 && modelDiscovery is CodexModelDiscovery
         )
         if shouldRestoreSavedSetup { loadSavedSetup() }
+        if profile.jevClassifier != nil { refreshJevAPIKeyStatus() }
         // A route this launch adopted rather than started is watched too: the
         // generated profile can be edited under it just as easily.
         if isApplied { beginWatchingCodexSelection() }
     }
 
     // MARK: - Navigation
+
+    package func selectJevClassifier() {
+        guard profile.algorithm?.supportsJevClassifier == true else { return }
+        profile.jevClassifier = profile.jevClassifier ?? JevClassifierConfiguration()
+        profile.judgeModelID = nil
+        profile.classifierTargetID = nil
+        profile.judgeNativeOptions = nil
+        refreshJevAPIKeyStatus()
+    }
+
+    package func refreshJevAPIKeyStatus() {
+        do {
+            hasJevAPIKey = try jevAPIKeyStore.load()?.isEmpty == false
+            jevAPIKeyError = nil
+        } catch {
+            hasJevAPIKey = false
+            jevAPIKeyError = error.localizedDescription
+        }
+    }
+
+    @discardableResult
+    package func saveJevAPIKey(_ input: String) -> Bool {
+        do {
+            let key = input.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !key.isEmpty, key.utf8.allSatisfy({ (33...126).contains($0) }) else {
+                throw JevAPIKeyStore.Failure.invalidKey
+            }
+            try jevAPIKeyStore.save(key)
+            hasJevAPIKey = true
+            jevAPIKeyError = nil
+            jevAPIKeyRevision += 1
+            return true
+        } catch {
+            jevAPIKeyError = error.localizedDescription
+            return false
+        }
+    }
+
+    package func removeJevAPIKey() {
+        do {
+            try jevAPIKeyStore.delete()
+            hasJevAPIKey = false
+            jevAPIKeyError = nil
+            jevAPIKeyRevision += 1
+        } catch {
+            jevAPIKeyError = error.localizedDescription
+        }
+    }
+
+    package var jevAPIKeyBlocker: String? {
+        guard profile.jevClassifier != nil else { return nil }
+        return jevAPIKeyError ?? (hasJevAPIKey ? nil : "Save your TypeSafe API key under Routing decisions before starting Jev.")
+    }
+
+    package func serverEnvironment() throws -> [String: String] {
+        guard profile.jevClassifier != nil else { return [:] }
+        guard let key = try jevAPIKeyStore.load(), !key.isEmpty else {
+            throw JevAPIKeyStore.Failure.invalidKey
+        }
+        return [JevClassifierConfiguration.apiKeyEnvironmentVariable: key]
+    }
 
     package var canGoBack: Bool { step != .provider && !isBusy }
 
@@ -624,6 +692,7 @@ package final class WizardModel {
         guard canLoadRoleGroupSetup,
               let saved = roleLibrary.groups.first(where: { $0.id == id })?.routingProfile else { return false }
         profile = saved
+        if profile.jevClassifier != nil { refreshJevAPIKeyStatus() }
         adoptSetupRolesIntoLibrary()
         if discoveryState.isReady {
             profile.imageCapableModelIDs = Set(discoveredModels.filter(\.supportsImages).map(\.id))
@@ -776,6 +845,16 @@ package final class WizardModel {
         if profile.nativeRouteOptions != nil {
             return "\(algorithm.displayName) uses the native route options shown below."
         }
+        if let jev = profile.jevClassifier {
+            if algorithm == .llmClassifier {
+                return "Jev / TypeSafe (\(jev.modelID)) chooses a target using your role descriptions. "
+                    + "Decision failures use the default target. "
+                    + "Classification: \(profile.classifyTrigger.displayName.lowercased())."
+            }
+            let behavior = algorithm == .composite ? "Stage signals can then switch tiers. " : ""
+            return "Jev / TypeSafe (\(jev.modelID)) chooses Capable when its probability is above \(jev.cutoff). "
+                + behavior + "Classification: \(profile.classifyTrigger.displayName.lowercased())."
+        }
         if algorithm.supportsClassifyTrigger {
             return "\(algorithm.summary) Classification: \(profile.classifyTrigger.displayName.lowercased())."
         }
@@ -795,6 +874,7 @@ package final class WizardModel {
 
     package var canApply: Bool {
         discoveryState.isReady
+            && jevAPIKeyBlocker == nil
             && unverifiedAssignmentBlocker == nil
             && profile.isValid
             && !isBusy
@@ -810,6 +890,7 @@ package final class WizardModel {
         if !discoveryState.isReady { return discoveryState.blockingMessage }
         if let unverifiedAssignmentBlocker { return unverifiedAssignmentBlocker }
         if let invalid = profile.validationErrors.first { return invalid }
+        if let jevAPIKeyBlocker { return jevAPIKeyBlocker }
         if !readiness.isReady { return readiness.blockers.first }
         return nil
     }
@@ -858,6 +939,11 @@ package final class WizardModel {
             profile.nativeRouteOptions ?? "",
             profile.judgeModelID ?? "",
             profile.judgeNativeOptions ?? "",
+            profile.jevClassifier?.modelID ?? "",
+            profile.jevClassifier.map { String($0.cutoff) } ?? "",
+            profile.jevClassifier?.instructions ?? "",
+            hasJevAPIKey ? "jev-key-saved" : "no-jev-key",
+            String(jevAPIKeyRevision),
             profile.reviewerSystemPrompt ?? "",
             profile.classifierTargetID?.uuidString ?? "",
             profile.defaultTargetID?.uuidString ?? "",
@@ -922,6 +1008,13 @@ package final class WizardModel {
             applyState = .failed("Revert the active route before applying another profile.")
             return
         }
+        if profile.jevClassifier != nil {
+            refreshJevAPIKeyStatus()
+            if let jevAPIKeyBlocker {
+                applyState = .failed(jevAPIKeyBlocker)
+                return
+            }
+        }
         diagnostics.info("routing", "Applying a routing profile", [
             ("algorithm", profile.algorithm?.rawValue ?? "none"),
             ("tiers", String(profile.tiers.count)),
@@ -943,6 +1036,7 @@ package final class WizardModel {
 
         var startedProxy = false
         do {
+            let environment = try serverEnvironment()
             applyState = .working("Writing routing configuration…")
             let configPath = try SwitchyardConfigWriter.write(
                 profile: profile,
@@ -951,7 +1045,7 @@ package final class WizardModel {
             )
 
             applyState = .working("Validating configuration…")
-            try SwitchyardConfigWriter.validate(configPath: configPath, binaryPath: binary)
+            try SwitchyardConfigWriter.validate(configPath: configPath, binaryPath: binary, environment: environment)
 
             applyState = .working("Starting the proxy…")
             try await processManager.start(
@@ -960,7 +1054,8 @@ package final class WizardModel {
                 host: profile.host,
                 port: profile.port,
                 routingLogPath: RoutingLogReader.defaultLogURL,
-                liteLLMModels: profile.managedLiteLLMModels
+                liteLLMModels: profile.managedLiteLLMModels,
+                environment: environment
             )
             startedProxy = true
 
@@ -1235,6 +1330,7 @@ package final class WizardModel {
 
     private func evaluateReadiness() async -> RoutingReadiness {
         let checker = readinessChecker
+        let environment = (try? serverEnvironment()) ?? [:]
         let profile = profile
         let binaryPathOverride = binaryPathOverride
         let routingConfigPath = routingConfigPath
@@ -1244,7 +1340,8 @@ package final class WizardModel {
                 profile: profile,
                 binaryPathOverride: binaryPathOverride,
                 routingConfigPath: routingConfigPath,
-                codexProfilePath: codexProfilePath
+                codexProfilePath: codexProfilePath,
+                environment: environment
             )
         }.value
     }

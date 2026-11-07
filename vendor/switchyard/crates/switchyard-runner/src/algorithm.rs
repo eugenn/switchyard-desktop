@@ -1389,9 +1389,14 @@ impl LlmClassifierRouteConfig {
             (None, false) => ClassifierMode::Capability,
         };
 
-        if decision.is_some() && !matches!(selected_mode, ClassifierMode::Capability) {
+        if decision.is_some()
+            && !matches!(
+                selected_mode,
+                ClassifierMode::Capability | ClassifierMode::Direct
+            )
+        {
             return Err(AlgorithmConfigError::new(format!(
-                "llm_classifier route {route_name}: decision requires capability mode"
+                "llm_classifier route {route_name}: decision requires capability or direct mode"
             )));
         }
 
@@ -1563,6 +1568,13 @@ impl LlmClassifierRouteConfig {
                 ))
             }
             ClassifierMode::Direct => {
+                if decision.as_ref().is_some_and(|decision| {
+                    decision.cutoff.is_some() || decision.apply_cutoff_to.is_some()
+                }) {
+                    return Err(AlgorithmConfigError::new(format!(
+                        "llm_classifier route {route_name}: direct decision cannot use cutoff or apply_cutoff_to"
+                    )));
+                }
                 if !classifier_target.is_empty()
                     || strong_target.is_some()
                     || weak_target.is_some()
@@ -1595,6 +1607,12 @@ impl LlmClassifierRouteConfig {
                     default_target,
                     config: DirectClassifierConfig {
                         options,
+                        instructions: decision
+                            .as_ref()
+                            .and_then(|decision| decision.instructions.clone()),
+                        choices: decision
+                            .as_ref()
+                            .and_then(|decision| decision.choices.clone()),
                         fail_open: fail_open.unwrap_or(true),
                         classify_trigger: *classify_trigger,
                         message_hash_fallback: *message_hash_fallback,

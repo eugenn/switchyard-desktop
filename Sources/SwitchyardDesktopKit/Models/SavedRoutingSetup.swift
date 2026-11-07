@@ -118,6 +118,36 @@ package struct SavedRoutingSetup: Codable, Equatable, Sendable {
             ?? route.classifier?.target ?? route.advisor_target ?? route.judge_target
             ?? route.subagents?.models?[Self.judgeGroup]?.first
         profile.classifierTargetID = targetID(named: judgeName, in: targetNames, tiers: tiers)
+        if let judgeName, let decisionTarget = table["decision_targets"]?.table?[judgeName]?.table {
+            guard algorithm.supportsJevClassifier,
+                  let modelID = decisionTarget["id"]?.string,
+                  Set(decisionTarget.keys) == ["id", "decision_client"],
+                  let decisionClientName = decisionTarget["decision_client"]?.string,
+                  let decisionClient = table["decision_clients"]?.table?[decisionClientName]?.table,
+                  decisionClient["format"]?.string == "system_one",
+                  decisionClient["endpoint"]?.string == JevClassifierConfiguration.endpoint,
+                  decisionClient["api_key_env"]?.string == JevClassifierConfiguration.apiKeyEnvironmentVariable,
+                  Set(decisionClient.keys).isSubset(of: ["format", "endpoint", "api_key_env", "timeout_ms"]),
+                  decisionClient["timeout_ms"]?.int == 5000 else {
+                throw MigrationFailure.incompleteRoute
+            }
+            let decision = algorithm == .composite
+                ? routeTable["classifier"]?.table?["decision"]?.table
+                : routeTable["decision"]?.table
+            profile.jevClassifier = JevClassifierConfiguration(
+                modelID: modelID,
+                cutoff: decision?["cutoff"]?.double ?? 0.6,
+                instructions: decision?["instructions"]?.string ?? ""
+            )
+            if algorithm == .llmClassifier, let choices = decision?["choices"]?.array {
+                for choice in choices {
+                    guard let id = choice.table?["id"]?.string,
+                          let description = choice.table?["description"]?.string,
+                          let index = targetNames.firstIndex(of: id) else { continue }
+                    profile.tiers[index].summary = description
+                }
+            }
+        }
         if profile.classifierTargetID == nil, let judgeName, let judge = document.targets[judgeName] {
             // Generated judge aliases use the same model as a role or a separate
             // discovered judge model. Keep the native alias and its settings.
@@ -165,6 +195,15 @@ package struct SavedRoutingSetup: Codable, Equatable, Sendable {
         profile.advertisesReasoningSummaries = route.reasoning_summaries ?? true
         NativeRoutingOptions.migrateLegacyReasoningSummaries(in: &profile)
         NativeRoutingOptions.migrateLegacyPlanExecute(in: &profile)
+        if profile.jevClassifier != nil, let native = profile.nativeRouteOptions {
+            profile.nativeRouteOptions = nil
+            guard let rendered = try? SwitchyardConfigWriter.render(profile: profile),
+                  let generated = Self.route(in: rendered),
+                  let original = Self.route(in: "[routes.main]\n" + native),
+                  routingShape(generated) == routingShape(original) else {
+                throw MigrationFailure.incompleteRoute
+            }
+        }
         recoverGeneratedDescriptions(in: &profile)
 
         var models = generatedTargets.enumerated().map { index, target in

@@ -99,6 +99,24 @@ func theInMemoryTailIsBoundedWhileTheFileKeepsEverything() async throws {
     #expect(contents.contains("line 0 "))
 }
 
+@Test func aSecretSplitAcrossAnOversizedOutputLineIsNotRetained() async throws {
+    let directory = recorderDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let url = directory.appendingPathComponent("server.log")
+    let secret = "secret-prefix-fragment-secret-suffix-fragment"
+    let recorder = ChildOutputRecorder(url: url, redactingSecrets: [secret])
+    recorder.begin(banner: "fixture")
+    recorder.pipe.fileHandleForWriting.write(Data((String(repeating: "x", count: 4100) + "secret-prefix-fragment-").utf8))
+    try await Task.sleep(for: .milliseconds(150))
+    recorder.pipe.fileHandleForWriting.write(Data("secret-suffix-fragment\nready\n".utf8))
+    recorder.closeWriteEnd()
+    recorder.finish()
+    let text = try String(contentsOf: url, encoding: .utf8)
+    #expect(!text.contains("secret-prefix-fragment"))
+    #expect(!text.contains("secret-suffix-fragment"))
+    #expect(text.contains("ready"))
+}
+
 @Test(.timeLimit(.minutes(1)))
 func outputWithoutATrailingNewlineIsStillKept() async throws {
     let directory = recorderDirectory()

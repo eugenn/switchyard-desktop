@@ -275,6 +275,8 @@ impl Classifier for DecisionClassifier {
 pub struct DirectClassifierConfig {
     /// Categories the service may select. Their names are the option IDs.
     pub options: Vec<Category>,
+    pub instructions: Option<String>,
+    pub choices: Option<Vec<DecisionChoice>>,
     /// Routes to the default target when the decision call fails or returns an
     /// invalid choice.
     pub fail_open: bool,
@@ -304,8 +306,7 @@ impl DirectClassifier {
                 message: "direct mode needs at least two options other than judge and any".into(),
             });
         }
-        let question = choice_question(
-            "Select the option that should serve this request.".into(),
+        let choices = config.choices.clone().unwrap_or_else(|| {
             config
                 .options
                 .iter()
@@ -313,7 +314,27 @@ impl DirectClassifier {
                     id: option.as_str().into(),
                     description: format!("Serve this request with the {} models.", option.as_str()),
                 })
-                .collect(),
+                .collect()
+        });
+        let expected: BTreeSet<_> = config
+            .options
+            .iter()
+            .map(|option| option.as_str())
+            .collect();
+        let actual: BTreeSet<_> = choices.iter().map(|choice| choice.id.as_str()).collect();
+        if actual != expected || actual.len() != choices.len() {
+            return Err(LibsyError::AlgorithmError {
+                message:
+                    "direct decision choices must name every selectable model group exactly once"
+                        .into(),
+            });
+        }
+        let question = choice_question(
+            config
+                .instructions
+                .clone()
+                .unwrap_or_else(|| "Select the option that should serve this request.".into()),
+            choices,
         );
         Ok(Self {
             input: TaskInput {

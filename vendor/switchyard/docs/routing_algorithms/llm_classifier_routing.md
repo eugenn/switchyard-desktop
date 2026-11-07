@@ -292,6 +292,21 @@ instead. The decision client's `timeout_ms` sets how long the call may take.
 
 Direct mode is available only on standalone `llm_classifier` routes.
 
+Set `decision.instructions` and `decision.choices` to send your routing policy
+and role descriptions to the decision service. Choices must name every
+selectable group exactly once. Direct mode uses the selected choice, not a
+probability cutoff.
+
+```toml
+[routes.direct.decision]
+instructions = "Choose the role that fits the request."
+choices = [
+  { id = "fast", description = "Prescribed edits and simple questions." },
+  { id = "balanced", description = "Ordinary feature and bug work." },
+  { id = "premium", description = "Architecture and difficult investigations." },
+]
+```
+
 ## When the judge runs
 
 `classify_trigger` sets how often the target is re-decided.

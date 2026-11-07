@@ -9,7 +9,8 @@ Implement server behavior, API, routing algorithms, metrics and server tests the
 checks and packaging. `vendor/switchyard/` is an imported source snapshot, not a second development
 branch. Do not edit it directly. Builds never copy sources implicitly from NVIDIA.
 
-The current import uses committed sources from NVIDIA without tracked working-tree changes.
+The current development import includes tracked working-tree changes from PR #1001
+on top of core commit `d9b1f692471e924549cde7a98d2ec56a8b482ad5`.
 `vendor/switchyard-source.json` records the maintained fork URL and commit, integrated NVIDIA
 upstream URL and commit, whether tracked changes were included, and SHA-256 hashes for every imported
 file. The core commit alone is not the identity of a dirty snapshot. See [release provenance](releases.md).

@@ -1817,6 +1817,8 @@ mod tests {
                     default_target: Category::Efficient,
                     config: DirectClassifierConfig {
                         options: vec![Category::Efficient, Category::Capable],
+                        instructions: None,
+                        choices: None,
                         fail_open,
                         classify_trigger: ClassifyTrigger::EveryRequest,
                         message_hash_fallback: false,

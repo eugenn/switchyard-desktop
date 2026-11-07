@@ -301,7 +301,9 @@ struct TierAssignmentStepView: View {
                     if algorithm.requiresJudge { judgeField(algorithm) }
                     if algorithm == .llmClassifier { fallbackField }
                     if algorithm.supportsClassifyTrigger { classifyTriggerPicker }
-                    if algorithm.requiresJudge, model.profile.judgeTargetName != nil {
+                    if model.profile.jevClassifier != nil {
+                        JevClassifierSettingsView(model: model)
+                    } else if algorithm.requiresJudge, model.profile.judgeTargetName != nil {
                         nativeOptionsEditor(
                             label: "Judge target options",
                             text: Binding(
@@ -332,6 +334,7 @@ struct TierAssignmentStepView: View {
                 Section("Share a target's model") {
                     ForEach(model.profile.tiers) { tier in
                         Button(judgeTargetOption(tier)) {
+                            model.profile.jevClassifier = nil
                             model.profile.classifierTargetID = tier.id
                             model.profile.judgeModelID = nil
                         }
@@ -340,8 +343,14 @@ struct TierAssignmentStepView: View {
                 Section("Give it a model of its own") {
                     ForEach(model.discoveredModels, id: \.id) { entry in
                         Button(entry.displayName ?? entry.id) {
+                            model.profile.jevClassifier = nil
                             model.profile.judgeModelID = entry.id
                         }
+                    }
+                }
+                if algorithm.supportsJevClassifier {
+                    Section("Decision model") {
+                        Button("Jev / TypeSafe") { model.selectJevClassifier() }
                     }
                 }
             }
@@ -385,6 +394,7 @@ struct TierAssignmentStepView: View {
     }
 
     private var judgeSelectionLabel: String {
+        if let jev = model.profile.jevClassifier { return "Jev / TypeSafe - \(jev.modelID)" }
         if let judge = model.profile.judgeModelID {
             let entry = model.discoveredModels.first { $0.id == judge }
             return "\(entry?.displayName ?? judge) · a model of its own"
@@ -396,6 +406,9 @@ struct TierAssignmentStepView: View {
     }
 
     private func judgeExplanation(isAdvisor: Bool) -> String {
+        if model.profile.jevClassifier != nil {
+            return "Jev makes a typed decision through TypeSafe's System One API. Your Codex models still serve the answers."
+        }
         let work = isAdvisor ? "review" : "routing call"
         if model.profile.judgeModelID != nil {
             return "The \(work) runs on a model of its own, so it never queues behind the model "
@@ -468,7 +481,8 @@ struct TierAssignmentStepView: View {
     private var rolesPanel: some View {
         VStack(spacing: 0) {
             rolesBar
-            if model.profile.algorithm == .llmClassifier, let classifier = model.classifierRole {
+            if model.profile.algorithm == .llmClassifier, model.profile.jevClassifier == nil,
+               let classifier = model.classifierRole {
                 RouterDivider()
                 judgePromptRow(classifier)
             }
@@ -568,7 +582,7 @@ struct TierAssignmentStepView: View {
 
     /// What is unfinished about the roles, so the bar says it without being opened.
     private var unfinishedRoleSummary: String? {
-        if let classifier = model.classifierRole, !classifier.rendersTargets {
+        if model.profile.jevClassifier == nil, let classifier = model.classifierRole, !classifier.rendersTargets {
             return "judge prompt is missing \(RoutingRole.targetsPlaceholder)"
         }
         let blank = model.targetRoles.filter { !$0.isDescribed && model.isRoleInUse($0) }

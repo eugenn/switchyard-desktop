@@ -21,16 +21,19 @@ package final class ChildOutputRecorder: @unchecked Sendable {
     package let pipe = Pipe()
 
     private let url: URL
+    private let redactingSecrets: [String]
     /// Guards the buffers and the file.
     private let lock = NSLock()
     /// Guards reading from the pipe, so the background handler and `finish()`
     /// cannot each take half of the child's last words.
     private let readLock = NSLock()
     private var pending = Data()
+    private var discardingLongSecretLine = false
     private var recent = ""
 
-    package init(url: URL) {
+    package init(url: URL, redactingSecrets: [String] = []) {
         self.url = url
+        self.redactingSecrets = redactingSecrets.filter { !$0.isEmpty }
     }
 
     /// Starts draining. `banner` names the run that follows it in the file.
@@ -95,19 +98,33 @@ package final class ChildOutputRecorder: @unchecked Sendable {
         var raw: [Data] = []
         lock.lock()
         pending.append(data)
+        if discardingLongSecretLine {
+            guard let breakIndex = pending.firstIndex(of: UInt8(ascii: "\n")) else {
+                pending = Data()
+                lock.unlock()
+                return
+            }
+            pending = pending[pending.index(after: breakIndex)...]
+            discardingLongSecretLine = false
+        }
         while let breakIndex = pending.firstIndex(of: UInt8(ascii: "\n")) {
             raw.append(pending[pending.startIndex..<breakIndex])
             pending = pending[pending.index(after: breakIndex)...]
         }
         // A child that writes no newline at all must not grow this without bound.
         if pending.count > Self.lineLimit {
-            raw.append(pending)
+            if redactingSecrets.isEmpty {
+                raw.append(pending)
+            } else {
+                raw.append(Data(DiagnosticRedactor.placeholder.utf8))
+                discardingLongSecretLine = true
+            }
             pending = Data()
         }
         lock.unlock()
         // Redaction is regex work: it stays outside the lock so a chatty server
         // cannot serialise itself behind it.
-        record(raw.map(Self.line(from:)))
+        record(raw.map(line(from:)))
     }
 
     private func flushPending() {
@@ -116,11 +133,14 @@ package final class ChildOutputRecorder: @unchecked Sendable {
         pending = Data()
         lock.unlock()
         guard !remainder.isEmpty else { return }
-        record([Self.line(from: remainder)])
+        record([line(from: remainder)])
     }
 
-    private static func line(from data: Data) -> String {
-        let text = String(decoding: Array(data.prefix(lineLimit)), as: UTF8.self)
+    private func line(from data: Data) -> String {
+        let redacted = redactingSecrets.reduce(String(decoding: data, as: UTF8.self)) {
+            $0.replacingOccurrences(of: $1, with: DiagnosticRedactor.placeholder)
+        }
+        let text = String(redacted.prefix(Self.lineLimit))
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return text.isEmpty ? "" : DiagnosticRedactor.redact(text)
     }

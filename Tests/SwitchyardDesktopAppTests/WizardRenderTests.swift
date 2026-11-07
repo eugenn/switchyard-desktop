@@ -16,6 +16,50 @@ private struct FixtureDiscovery: CodexModelDiscovering {
     func discover(using setup: CodexSetup) throws -> [CodexSubscriptionModel] { fixtureModels }
 }
 
+@MainActor
+@Test func renderJevSettingsForVisualReview() async throws {
+    guard let output = ProcessInfo.processInfo.environment["SWITCHYARD_DESKTOP_RENDER_JEV"] else { return }
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let model = WizardModel(
+        readinessChecker: FixtureReadiness(),
+        routingConfigPath: directory.appendingPathComponent("routes.toml"),
+        codexConfigPath: directory.appendingPathComponent("config.toml"),
+        codexProfilePath: directory.appendingPathComponent("switch.config.toml"),
+        sessionStore: ActiveRoutingSessionStore(fileURL: directory.appendingPathComponent("active.json")),
+        savedSetupStore: SavedRoutingSetupStore(fileURL: directory.appendingPathComponent("saved.json")),
+        roleLibraryStore: RoleLibraryStore(fileURL: directory.appendingPathComponent("roles.json")),
+        preferencesStore: AppPreferencesStore(fileURL: directory.appendingPathComponent("preferences.json")),
+        jevAPIKeyStore: InMemoryJevAPIKeyStore(),
+        setupReader: FixtureSetupReader(), modelDiscovery: FixtureDiscovery(),
+        cliVersionProbe: { "test" }, restoreSavedSetup: false,
+        diagnostics: DiagnosticLog(url: directory.appendingPathComponent("diagnostics.log"))
+    )
+    await model.refreshSubscriptionModels()
+    model.selectRoutingAlgorithm(.capability)
+    for index in model.profile.tiers.indices {
+        model.profile.tiers[index].modelID = fixtureModels[index].id
+    }
+    model.selectJevClassifier()
+    model.step = .tiers
+    let view = JevClassifierSettingsView(model: model)
+        .padding(16)
+        .frame(width: 480)
+        .background(RouterTheme.win)
+        .foregroundStyle(RouterTheme.ink)
+        .environment(\.colorScheme, .dark)
+    let hosting = NSHostingView(rootView: view)
+    hosting.frame = NSRect(origin: .zero, size: hosting.fittingSize)
+    hosting.layoutSubtreeIfNeeded()
+    try await Task.sleep(for: .milliseconds(200))
+    hosting.layoutSubtreeIfNeeded()
+    let bitmap = try #require(hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds))
+    hosting.cacheDisplay(in: hosting.bounds, to: bitmap)
+    try #require(bitmap.representation(using: .png, properties: [:]))
+        .write(to: URL(fileURLWithPath: output))
+}
+
 private struct FixtureSetupReader: CodexSetupReading {
     func read(configPath: URL) throws -> CodexSetup {
         CodexSetup(configPath: configPath, model: "gpt-5.6-terra", modelProvider: "openai")

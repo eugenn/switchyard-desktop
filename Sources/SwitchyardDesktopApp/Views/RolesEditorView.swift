@@ -557,6 +557,9 @@ struct RolesEditorView: View {
     }
 
     private var judgeModelSummary: String {
+        if model.profile.jevClassifier != nil {
+            return "Jev uses typed decision instructions under Routing decisions, not this LLM prompt or its reasoning settings."
+        }
         guard let id = model.profile.classifierModel else {
             return "No model decides the routing yet — pick one under Routing decisions on the "
                 + "routing step."

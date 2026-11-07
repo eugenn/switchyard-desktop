@@ -10,6 +10,10 @@ package struct SettingsView: View {
 
     package var body: some View {
         VStack(alignment: .leading, spacing: 14) {
+            SectionLabel("Jev / TypeSafe")
+            RouterPanel {
+                JevAPIKeyEditor(model: model).padding(12)
+            }
             SectionLabel("Spend")
             RouterPanel {
                 VStack(alignment: .leading, spacing: 8) {

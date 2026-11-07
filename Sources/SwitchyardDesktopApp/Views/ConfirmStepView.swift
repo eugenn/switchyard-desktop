@@ -76,6 +76,13 @@ struct ConfirmStepView: View {
                             )
                         }
                         RouterDivider()
+                        if model.profile.jevClassifier != nil {
+                            RouterNote(
+                                systemImage: "network",
+                                text: "Jev sends conversation context to TypeSafe for separately billed classification. The API key stays in macOS Keychain.",
+                                tint: RouterTheme.warn
+                            )
+                        }
                         Text(model.routingSummary)
                             .font(RouterTheme.sans(11))
                             .foregroundStyle(RouterTheme.ink3)

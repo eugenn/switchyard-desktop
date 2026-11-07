@@ -174,7 +174,17 @@ async fn direct_mode_serves_the_selected_group() -> Result<(), Box<dyn std::erro
     unsafe {
         std::env::set_var("SWITCHYARD_DIRECT_DECISIONS_TEST_KEY", "test-key");
     }
-    let runner = Runner::from_toml(&direct_config(&server.uri()));
+    let source = direct_config(&server.uri())
+        + r#"
+[routes.direct.decision]
+instructions = "Choose a role using these descriptions."
+choices = [
+  { id = "balanced", description = "Ordinary feature work" },
+  { id = "fast", description = "Prescribed edits" },
+  { id = "premium", description = "Architecture and ambiguous requirements" },
+]
+"#;
+    let runner = Runner::from_toml(&source);
     unsafe {
         std::env::remove_var("SWITCHYARD_DIRECT_DECISIONS_TEST_KEY");
     }
@@ -182,11 +192,11 @@ async fn direct_mode_serves_the_selected_group() -> Result<(), Box<dyn std::erro
     // The choice routes even though another option has the higher probability.
     Mock::given(method("POST")).and(path("/v1/decisions"))
         .and(body_partial_json(json!({"model": "router-model", "questions": [{
-            "name": "route", "type": "choice",
+            "name": "route", "type": "choice", "instructions": "Choose a role using these descriptions.",
             "choices": [
-                {"value": "balanced", "description": "Serve this request with the balanced models."},
-                {"value": "fast", "description": "Serve this request with the fast models."},
-                {"value": "premium", "description": "Serve this request with the premium models."}
+                {"value": "balanced", "description": "Ordinary feature work"},
+                {"value": "fast", "description": "Prescribed edits"},
+                {"value": "premium", "description": "Architecture and ambiguous requirements"}
             ]
         }]})))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
@@ -257,5 +267,19 @@ fn direct_mode_rejects_invalid_configuration() {
             .unwrap_or_else(|| panic!("expected a load error for {to}"))
             .to_string();
         assert!(error.contains(expected), "{to}: {error}");
+    }
+    for decision in [
+        "cutoff = 0.6",
+        "apply_cutoff_to = \"fast\"",
+        "choices = [{ id = \"fast\", description = \"Edits\" }]",
+        "choices = [{ id = \"fast\", description = \"Edits\" }, { id = \"balanced\", description = \"Features\" }, { id = \"premium\", description = \"Architecture\" }, { id = \"premium\", description = \"Duplicate\" }]",
+    ] {
+        let source =
+            direct_config("http://127.0.0.1:1") + "\n[routes.direct.decision]\n" + decision;
+        assert!(
+            AlgorithmFactory::from_toml(&source)
+                .and_then(|factory| factory.build())
+                .is_err()
+        );
     }
 }

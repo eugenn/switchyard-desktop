@@ -14,11 +14,18 @@ there and run the affected crate tests. Preserve published commits and release
 tags; do not rebase history already referenced by desktop releases.
 
 The current snapshot imports maintained fork commit
-`67f6257d4a1fab22fa2ad639e9ffac2e6e848938` without tracked working-tree changes.
+`d9b1f692471e924549cde7a98d2ec56a8b482ad5` with tracked working-tree changes.
 It includes the fork's routing work, LiteLLM session headers, agent identity in
 routing logs, and the latest integrated upstream changes. Use the manifest's
 `upstream_commit` and `commit` to inspect committed differences in the core
 checkout, and its file hashes to verify the imported sources.
+
+The development snapshot also includes [PR #1001](https://github.com/NVIDIA-NeMo/Switchyard/pull/1001),
+commit `5438bd3d2eae5269e3736c622494da00975a99ab`, applied in the core working tree
+without creating a commit. It forwards a caller-provided `x-litellm-session-id`
+header by default. It does not generate a session ID. The manifest marks this
+snapshot with `includes_tracked_worktree_changes = true`; public releases require
+committing and publishing the core changes, then importing a clean snapshot.
 
 Before the first clean public core release, review the complete upstream diff,
 document the supported differences in the fork, and ensure changed upstream
