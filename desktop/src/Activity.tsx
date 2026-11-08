@@ -88,8 +88,10 @@ export function Activity({ settings, stats: rawStats, statsError, running, onOpe
       <LatencyCard stats={stats} modelIDs={modelIDs} selectedModelID={selectedModelID} onShowAll={() => setSelectedModelID(null)} />
       <LatestTurns records={records} session={flowSession} modelIDs={modelIDs} roleOf={(record) => roleFor(record, profile)} emptyReason={emptyReason} onOpenRequests={onOpenRequests} />
     </div>
-    <ModelsAndProxy metrics={metrics} stats={stats} session={flowSession} roleName={(target) => target == null ? null : profile.targetNames.get(target) ?? target} />
-    {(metrics.delegatedCount > 0 || metrics.subagentIdentityUnsupported) && <Subagents metrics={metrics} modelIDs={modelIDs} />}
+    <div className="stats-pair">
+      <ModelsAndProxy metrics={metrics} stats={stats} session={flowSession} roleName={(target) => target == null ? null : profile.targetNames.get(target) ?? target} />
+      {(metrics.delegatedCount > 0 || metrics.subagentIdentityUnsupported) && <Subagents metrics={metrics} modelIDs={modelIDs} />}
+    </div>
   </div>;
 }
 

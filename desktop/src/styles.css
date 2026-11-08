@@ -460,6 +460,9 @@ pre{overflow:auto;max-height:48vh;padding:22px 24px;font-size:11px;line-height:1
 .turns-table tbody tr{cursor:pointer}
 .turns-table tbody tr:hover td{background:rgba(255,255,255,.02)}
 .stats-panel{padding:9px 12px 10px;background:var(--panel);border:1px solid var(--line);border-radius:8px;display:flex;flex-direction:column;gap:8px}
+.stats-pair{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,520px),1fr));gap:12px;align-items:start}
+.stats-pair>.stats-panel{min-width:0}
+.stats-panel header{flex-wrap:wrap;row-gap:2px}
 .stats-panel h3{margin:0;font-size:12.5px;font-weight:600}
 .stats-panel header code{font-size:10px;color:var(--ink3)}
 .proxy-table{width:100%;border-collapse:collapse;table-layout:fixed;font:10.5px var(--sysmono)}
