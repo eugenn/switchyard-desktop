@@ -23,7 +23,7 @@ export function ModelDiscovery({ settings, disabled, change }: { settings: Route
   }
   return <section className={`model-discovery${open ? " open" : ""}`}>
     <div className="discovery-bar">
-      <span className={`discovery-state${models.length ? " ready" : ""}`}>{models.length > 0 && <i aria-hidden="true" />}{models.length ? `${models.length} account models are suggested in the fields below` : "Fill model IDs faster from your Codex account"}</span>
+      <span className={`discovery-state${models.length ? " ready" : ""}`}>{models.length > 0 && <i aria-hidden="true" />}{models.length ? `${models.length} models from your Codex CLI account are suggested as you type` : "Suggest model IDs from your Codex CLI account"}</span>
       <button type="button" className="button secondary small" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Close" : models.length ? "Manage account models" : "Load account models"}</button>
     </div>
     {open && <div className="discovery-body">

@@ -52,7 +52,8 @@ export function servingTargets(settings: RouteSettings): ModelTarget[] {
 }
 export interface AvailableModel { id: string; displayName: string; supportsImages: boolean; contextWindow: number | null; efforts: string[] }
 export interface ClaudeSettings { executable: string; efficientModel: string; capableModel: string }
-export interface ClaudeStatus { installed: boolean; version: string; signedIn: boolean; subscriptionAuth: boolean; pending: boolean; supported: boolean; pluginAvailable: boolean; message: string }
+export interface ClaudeStatus { installed: boolean; version: string; signedIn: boolean; subscriptionAuth: boolean; pending: boolean; supported: boolean; compatibleVersion: boolean; pluginAvailable: boolean; message: string; models: ClaudeModel[] }
+export interface ClaudeModel { id: string; name: string; recommended: boolean }
 export interface PreparedClaudePlugin { directory: string; command: string }
 export interface RuntimeStatus {
   available: boolean;

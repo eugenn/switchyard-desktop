@@ -5,7 +5,7 @@ import { api, type RouteSettings } from "./api";
 
 vi.mock("./api", async (original) => {
   const module = await original<typeof import("./api")>();
-  return { ...module, native: true, api: { bootstrap: vi.fn(), preview: vi.fn(), save: vi.fn(), saveLibrary: vi.fn(), typesafeKeyStatus: vi.fn(), saveTypesafeKey: vi.fn(), start: vi.fn(), stop: vi.fn(), status: vi.fn(), stats: vi.fn(), history: vi.fn(), modelPrices: vi.fn(), discoverModels: vi.fn(), importSetup: vi.fn(), beginLogin: vi.fn(), loginStatus: vi.fn(), cancelLogin: vi.fn() } };
+  return { ...module, native: true, api: { bootstrap: vi.fn(), preview: vi.fn(), save: vi.fn(), saveLibrary: vi.fn(), typesafeKeyStatus: vi.fn(), saveTypesafeKey: vi.fn(), start: vi.fn(), stop: vi.fn(), status: vi.fn(), stats: vi.fn(), history: vi.fn(), modelPrices: vi.fn(), discoverModels: vi.fn(), importSetup: vi.fn(), beginLogin: vi.fn(), loginStatus: vi.fn(), cancelLogin: vi.fn(), claudeSettings: vi.fn(), claudeStatus: vi.fn() } };
 });
 
 const settings: RouteSettings = { algorithm: "stage_router", efficientModel: "test-small", capableModel: "test-large" };
@@ -18,12 +18,14 @@ beforeEach(() => {
   vi.mocked(api.status).mockResolvedValue({ ...stoppedSession, running: true });
   vi.mocked(api.history).mockResolvedValue([]);
   vi.mocked(api.modelPrices).mockResolvedValue({});
+  vi.mocked(api.claudeSettings).mockResolvedValue({ executable: "", efficientModel: "", capableModel: "" });
+  vi.mocked(api.claudeStatus).mockRejectedValue("Claude Code is not installed in this test");
   vi.mocked(api.stats).mockResolvedValue({ total_requests: 7, total_tokens: { total: 120 }, total_errors: 0 });
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 const openPage = (name: "Routing" | "Roles" | "Activity" | "Requests") => fireEvent.click(screen.getByRole("button", { name: new RegExp(name) }));
-const showAllStrategies = () => fireEvent.click(screen.getByRole("button", { name: /More strategies/ }));
+const openStrategies = () => fireEvent.click(screen.getByRole("button", { name: "Change strategy" }));
 
 it("loads saved settings without writing anything", async () => {
   render(<App />);
@@ -86,6 +88,7 @@ describe("model validation", () => {
     await screen.findByDisplayValue("test-small");
     fireEvent.change(screen.getByDisplayValue("test-large"), { target: { value: "test-small" } });
     expect(screen.getByRole("button", { name: /Start routing/ })).toHaveProperty("disabled", false);
+    openStrategies();
     fireEvent.click(screen.getByRole("radio", { name: /Passthrough/ }));
     expect(screen.getByRole("button", { name: /Start routing/ })).toHaveProperty("disabled", false);
   });
@@ -109,7 +112,7 @@ it("does not offer Start until ChatGPT sign-in is complete", async () => {
 it("offers the complete algorithm catalog and edits custom roles and targets", async () => {
   render(<App />);
   await screen.findByDisplayValue("test-small");
-  showAllStrategies();
+  openStrategies();
   expect(screen.getByRole("radio", { name: /Custom classifier/ })).toBeTruthy();
   expect(screen.getByRole("radio", { name: /Verification-gated routing/ })).toBeTruthy();
   fireEvent.click(screen.getByRole("radio", { name: /Custom classifier/ }));
@@ -127,7 +130,7 @@ it("offers the complete algorithm catalog and edits custom roles and targets", a
 it("selects a valid composite trigger and edits the shared role library", async () => {
   render(<App />);
   await screen.findByDisplayValue("test-small");
-  showAllStrategies();
+  openStrategies();
   fireEvent.click(screen.getByRole("radio", { name: /Composite/ }));
   expect(screen.getByLabelText("Classification trigger")).toHaveProperty("value", "user_turn");
   openPage("Roles");
@@ -140,9 +143,41 @@ it("starts no-op without a model or a signed-in account", async () => {
   vi.mocked(api.bootstrap).mockResolvedValue({ settings, runtime, login: { ...login, signedIn: false }, session: stoppedSession });
   render(<App />);
   await screen.findByDisplayValue("test-small");
-  showAllStrategies();
+  openStrategies();
   fireEvent.click(screen.getByRole("radio", { name: /No-op/ }));
   expect(screen.getByRole("button", { name: /Start routing/ })).toHaveProperty("disabled", false);
+});
+
+it("saves the edited setup before starting, so a started route is never lost", async () => {
+  vi.mocked(api.save).mockResolvedValue();
+  vi.mocked(api.start).mockResolvedValue({ ...stoppedSession, running: true });
+  render(<App />);
+  const input = await screen.findByDisplayValue("test-small");
+  expect(screen.getByText(/Settings are saved/)).toBeTruthy();
+  fireEvent.change(input, { target: { value: "edited-model" } });
+  expect(screen.getByText(/unsaved changes; starting saves them/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Save and start" }));
+  await waitFor(() => expect(api.start).toHaveBeenCalledTimes(1));
+  const edited = { ...settings, efficientModel: "edited-model" };
+  expect(api.save).toHaveBeenCalledWith(edited);
+  expect(api.start).toHaveBeenCalledWith(edited);
+  expect(vi.mocked(api.save).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(api.start).mock.invocationCallOrder[0]);
+});
+
+it("explains each model slot, points at the missing model and undoes a strategy switch", async () => {
+  render(<App />);
+  await screen.findByDisplayValue("test-small");
+  expect(screen.getByRole("region", { name: "Efficient" }).textContent).toContain("Serves most turns");
+  openStrategies();
+  fireEvent.click(screen.getByRole("radio", { name: /^Capability/ }));
+  expect(screen.getByRole("region", { name: "Judge" }).textContent).toContain("picks the model before it is served");
+  expect(screen.getByText("Choose a judge model or an existing judge target.")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Show" }));
+  expect(document.activeElement).toBe(screen.getByLabelText("Judge model"));
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  expect(screen.queryByRole("region", { name: "Judge" })).toBeNull();
+  expect(screen.getByText("Stage router")).toBeTruthy();
+  expect(screen.getByDisplayValue("test-large")).toBeTruthy();
 });
 
 it("shows history details without counting decision outcomes as calls", async () => {
@@ -187,6 +222,7 @@ it("imports a validated draft without automatically writing or starting", async 
   fireEvent.click(screen.getByRole("button", { name: "Import as draft" }));
   await screen.findByText(/Imported as an unsaved draft/);
   openPage("Routing");
+  openStrategies();
   expect(screen.getByRole("radio", { name: /Auto.*Recommended/ })).toHaveProperty("checked", true);
   expect(api.save).not.toHaveBeenCalled();
   expect(api.start).not.toHaveBeenCalled();
@@ -209,7 +245,7 @@ it("saves the role library even when routing models are incomplete", async () =>
   vi.mocked(api.bootstrap).mockResolvedValue({ settings: { ...settings, efficientModel: "", capableModel: "" }, runtime, login, session: stoppedSession });
   vi.mocked(api.saveLibrary).mockResolvedValue();
   render(<App />);
-  await screen.findByText("Bundled runtime ready");
+  await screen.findByText("Enter a valid model ID for each target.");
   openPage("Roles");
   fireEvent.click(screen.getByRole("button", { name: "New role" }));
   fireEvent.change(screen.getByLabelText("Role name"), { target: { value: "Persisted reviewer" } });
@@ -250,6 +286,7 @@ it("stores the Jev key through the native vault, never in routing settings", asy
   vi.mocked(api.saveTypesafeKey).mockResolvedValue();
   render(<App />);
   await screen.findByDisplayValue("test-small");
+  openStrategies();
   fireEvent.click(screen.getByRole("radio", { name: /^Capability/ }));
   fireEvent.click(screen.getByRole("checkbox", { name: "Use Jev / TypeSafe instead of an LLM judge" }));
   const input = await screen.findByLabelText("TypeSafe API key");

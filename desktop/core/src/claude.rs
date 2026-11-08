@@ -25,8 +25,20 @@ pub struct ClaudeStatus {
     pub subscription_auth: bool,
     pub pending: bool,
     pub supported: bool,
+    pub compatible_version: bool,
     pub plugin_available: bool,
     pub message: String,
+    /// Models offered to the signed-in organization, read from Claude Code's
+    /// own model catalog cache. Contains IDs and display names only.
+    pub models: Vec<ClaudeModel>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaudeModel {
+    pub id: String,
+    pub name: String,
+    pub recommended: bool,
 }
 
 #[derive(Serialize)]
@@ -58,13 +70,7 @@ impl ClaudeSettings {
     fn configuration(&self) -> Result<String> {
         self.validate()?;
         for model in [&self.efficient_model, &self.capable_model] {
-            if !model.starts_with("claude-")
-                || model.len() <= 7
-                || model.len() > 200
-                || !model
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || b"-_.".contains(&byte))
-            {
+            if !valid_model_id(model) {
                 return Err("Enter exact native Claude model IDs (claude-...) for both tiers. Availability is checked by Claude Code, not inferred from your subscription.".into());
             }
         }
@@ -233,6 +239,9 @@ impl ClaudeIntegration {
         )?;
         status.signed_in = success && auth["loggedIn"] == true;
         status.subscription_auth = status.signed_in && auth["authMethod"] == "claude.ai";
+        if status.signed_in {
+            status.models = self.account_models(auth["orgId"].as_str().unwrap_or(""));
+        }
         status.message = if !status.signed_in {
             "Claude Code is not signed in. Sign in with your Claude subscription."
         } else if !status.subscription_auth {
@@ -240,15 +249,11 @@ impl ClaudeIntegration {
         } else {
             "Claude subscription connected through the original Claude Code CLI. Credentials stay with Claude Code."
         }.into();
-        if !status.supported {
-            status.message.push_str(" Native Switchyard plugin packaging is currently macOS-only; Windows requires a core helper port.");
-        } else if !compatible_version(&status.version) {
+        // Routing blockers are reported through flags so the UI can show them
+        // separately from the account state.
+        status.compatible_version = compatible_version(&status.version);
+        if !status.compatible_version {
             status.plugin_available = false;
-            status
-                .message
-                .push_str(" Routing requires Claude Code 2.1.301 or newer with mods enabled.");
-        } else if !status.plugin_available {
-            status.message.push_str(" Prepare the matching bundled plugin with python3 scripts/prepare-runtime.py --claude-plugin in desktop/.");
         }
         Ok(status)
     }
@@ -303,6 +308,83 @@ impl ClaudeIntegration {
         );
         Ok(PreparedClaudePlugin { directory, command })
     }
+}
+
+impl ClaudeIntegration {
+    /// Reads the newest catalog Claude Code cached for this organization under
+    /// `<CLAUDE_CONFIG_DIR>/cache/model-catalog/<orgId>-*.json`. The cache is an
+    /// unversioned Claude Code detail, so any unexpected shape yields no models
+    /// and the user can still type IDs.
+    fn account_models(&self, organization: &str) -> Vec<ClaudeModel> {
+        if organization.is_empty()
+            || organization.len() > 64
+            || !organization
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        {
+            return Vec::new();
+        }
+        let Ok(entries) =
+            std::fs::read_dir(self.locations.claude_home().join("cache/model-catalog"))
+        else {
+            return Vec::new();
+        };
+        let prefix = format!("{organization}-");
+        let newest = entries
+            .flatten()
+            .filter(|entry| {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                name.starts_with(&prefix) && name.ends_with(".json")
+            })
+            .filter(|entry| {
+                entry
+                    .metadata()
+                    .is_ok_and(|meta| meta.is_file() && meta.len() <= 1 << 20)
+            })
+            .filter_map(|entry| {
+                let catalog: serde_json::Value =
+                    serde_json::from_slice(&std::fs::read(entry.path()).ok()?).ok()?;
+                Some((catalog["fetchedAt"].as_u64().unwrap_or(0), catalog))
+            })
+            .max_by_key(|(fetched, _)| *fetched);
+        let Some((_, catalog)) = newest else {
+            return Vec::new();
+        };
+        let mut models: Vec<ClaudeModel> = Vec::new();
+        for model in catalog["catalog"]["config"]["models"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .take(200)
+        {
+            let Some(id) = model["id"].as_str().filter(|id| valid_model_id(id)) else {
+                continue;
+            };
+            if models.iter().any(|known| known.id == id) {
+                continue;
+            }
+            let name = model["name"]
+                .as_str()
+                .filter(|name| name.len() <= 80 && !name.chars().any(char::is_control))
+                .unwrap_or(id);
+            models.push(ClaudeModel {
+                id: id.into(),
+                name: name.into(),
+                recommended: model["section"] == "main",
+            });
+        }
+        models
+    }
+}
+
+fn valid_model_id(model: &str) -> bool {
+    model.starts_with("claude-")
+        && model.len() > 7
+        && model.len() <= 200
+        && model
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"-_.".contains(&byte))
 }
 
 fn shell_quote(value: &str) -> String {
@@ -388,7 +470,7 @@ printf '%s\n' "$HOME" "$USERPROFILE" "$CLAUDE_CONFIG_DIR" >> command-paths
 if [ "$1" = "--version" ]; then echo '2.1.301 (Claude Code)'; exit 0; fi
 if [ "$2" = "login" ]; then
   if [ -f wait-login ]; then exec /bin/sleep 60; fi
-  printf '{"loggedIn":true,"authMethod":"claude.ai","accessToken":"mock-never-return-this"}' > status.json
+  printf '{"loggedIn":true,"authMethod":"claude.ai","orgId":"org-1","accessToken":"mock-never-return-this"}' > status.json
   exit 0
 fi
 if [ -f status.json ]; then cat status.json; else echo '{"loggedIn":false,"authMethod":"none"}'; exit 1; fi
@@ -418,7 +500,7 @@ if [ -f status.json ]; then cat status.json; else echo '{"loggedIn":false,"authM
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         };
-        assert!(status.signed_in && status.subscription_auth);
+        assert!(status.signed_in && status.subscription_auth && status.compatible_version);
         assert!(
             !serde_json::to_string(&status)
                 .unwrap()
@@ -434,6 +516,94 @@ if [ -f status.json ]; then cat status.json; else echo '{"loggedIn":false,"authM
             paths
                 .lines()
                 .all(|path| PathBuf::from(path).starts_with(integration.locations.root()))
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn lists_only_the_signed_in_organizations_cached_models() {
+        let (_temporary, mut integration, settings) = fixture();
+        let catalogs = integration
+            .locations
+            .claude_home()
+            .join("cache/model-catalog");
+        std::fs::create_dir_all(&catalogs).unwrap();
+        let catalog = |fetched: u64, models: &str| {
+            format!(
+                r#"{{"version":2,"fetchedAt":{fetched},"catalog":{{"config":{{"models":[{models}]}}}}}}"#
+            )
+        };
+        std::fs::write(
+            catalogs.join("org-1-old-ccd.json"),
+            catalog(
+                1,
+                r#"{"id":"claude-stale","name":"Stale","section":"main"}"#,
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            catalogs.join("org-1-new-ccd.json"),
+            catalog(
+                2,
+                r#"{"id":"claude-test-large","name":"Large","section":"main"},{"id":"claude-test-small","name":"Small","section":"overflow"},{"id":"claude-test-large","name":"Duplicate"},{"id":"gpt-other","name":"Other"},{"id":"claude-bad\n","name":"Bad"}"#,
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            catalogs.join("org-2-x-ccd.json"),
+            catalog(
+                3,
+                r#"{"id":"claude-other-org","name":"Other org","section":"main"}"#,
+            ),
+        )
+        .unwrap();
+        let path = integration.locations.root().join("status.json");
+        std::fs::write(
+            &path,
+            r#"{"loggedIn":true,"authMethod":"claude.ai","orgId":"org-1"}"#,
+        )
+        .unwrap();
+        let status = integration.status(&settings).await.unwrap();
+        assert_eq!(
+            status.models,
+            vec![
+                ClaudeModel {
+                    id: "claude-test-large".into(),
+                    name: "Large".into(),
+                    recommended: true
+                },
+                ClaudeModel {
+                    id: "claude-test-small".into(),
+                    name: "Small".into(),
+                    recommended: false
+                },
+            ]
+        );
+        std::fs::write(
+            &path,
+            r#"{"loggedIn":true,"authMethod":"claude.ai","orgId":"../org-1"}"#,
+        )
+        .unwrap();
+        assert!(
+            integration
+                .status(&settings)
+                .await
+                .unwrap()
+                .models
+                .is_empty()
+        );
+        std::fs::write(
+            &path,
+            r#"{"loggedIn":false,"authMethod":"none","orgId":"org-1"}"#,
+        )
+        .unwrap();
+        assert!(
+            integration
+                .status(&settings)
+                .await
+                .unwrap()
+                .models
+                .is_empty()
         );
     }
 
