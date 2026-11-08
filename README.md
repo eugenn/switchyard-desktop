@@ -12,6 +12,16 @@ React and Rust. Its source, runtime inputs, resources and build tools all live t
 GitHub Releases contain the retired application, not the current code. Build and
 run from source using the instructions below.
 
+![Switchyard Desktop Activity dashboard](images/activity.png)
+
+**Activity** shows how requests in the selected session were distributed across
+routing roles and models, along with latency, cache hits, and estimated API cost.
+
+![Switchyard Desktop Requests history and selected request details](images/requests.png)
+
+**Requests** lets you filter the routing log and inspect the model, classifier
+decision, and fresh, cached, and output token counts for an individual request.
+
 ## What you can connect
 
 | Integration | How it works | What you need |
