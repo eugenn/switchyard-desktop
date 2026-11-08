@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { algorithms, builtInRoles, servingTargets, validationMessage, type Algorithm, type ModelTarget, type RouteSettings, type RoutingRole } from "./api";
 import { families, guides, variableJob } from "./routingGuide";
 import { TypeSafeKey } from "./TypeSafeKey";
@@ -284,35 +284,58 @@ export function RolesEditor({ settings, change, disabled }: Props) {
   const groups = settings.roleGroups ?? [];
   const [search, setSearch] = useState("");
   const [groupFilter, setGroupFilter] = useState("");
+  const [browserOpen, setBrowserOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | undefined>(roles[0]?.id);
-  const selected = roles.find((role) => role.id === selectedId);
-  const update = (patch: Partial<RoutingRole>) => change({ roles: roles.map((role) => role.id === selectedId ? { ...role, ...patch } : role) });
+  const [pendingAction, setPendingAction] = useState<{ id: string; kind: "reset" | "delete" } | null>(null);
+  const selected = roles.find((role) => role.id === selectedId) ?? roles[0];
+  const nameInput = useRef<HTMLInputElement>(null);
+  const focusNewRole = useRef(false);
+  useEffect(() => {
+    if (focusNewRole.current) { nameInput.current?.focus(); nameInput.current?.select(); nameInput.current?.scrollIntoView?.({ block: "center" }); focusNewRole.current = false; }
+  }, [selected?.id]);
+  const filtered = roles.filter((role) => (!groupFilter || role.groupIDs.includes(groupFilter)) && [role.name, role.text, role.systemPrompt ?? "", ...role.tags].join(" ").toLowerCase().includes(search.trim().toLowerCase()));
+  const clearFilters = () => { setSearch(""); setGroupFilter(""); };
+  const update = (patch: Partial<RoutingRole>) => change({ roles: roles.map((role) => role.id === selected?.id ? { ...role, ...patch } : role) });
   const add = (duplicate = false) => {
     const role: RoutingRole = duplicate && selected ? { ...selected, id: crypto.randomUUID(), name: `${selected.name} copy`, isBuiltIn: false } :
       { id: crypto.randomUUID(), kind: "target", name: "New role", text: "", tags: [], groupIDs: [], isBuiltIn: false };
-    change({ roles: [...roles, role] }); setSelectedId(role.id);
+    focusNewRole.current = true;
+    change({ roles: [...roles, role] }); setSelectedId(role.id); setPendingAction(null); setBrowserOpen(false); clearFilters();
   };
   const assigned = (id: string) => settings.efficientRoleId === id || settings.capableRoleId === id ||
     (settings.classifierRoleId ?? classifierId) === id || [...(settings.targets ?? []), ...(settings.additionalTargets ?? [])].some((target) => target.roleId === id);
-  return <section className="panel roles-panel"><div className="panel-heading"><div><h2>Role library</h2><p>{builtInRoles.length} built-in roles plus your own prompts. Assign them to models on the Routing page.</p></div></div>
+  return <section className="panel roles-panel"><div className="panel-heading"><div><h2>Role library</h2><p>Define when a model is chosen and how it responds. Assign roles on the Routing page.</p></div><span className="role-count">{roles.length} roles</span></div>
     <fieldset disabled={disabled} className="roles-editor"><legend className="sr-only">Role library</legend>
-      <div className="role-toolbar"><label>Search roles<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Name, prompt or tag" /></label>
+      <div className="role-library-grid"><aside className={`role-browser${browserOpen ? " expanded" : ""}`} aria-label="Browse roles"><div className="role-browser-heading"><h3>All roles</h3><button className="button secondary role-browser-toggle" aria-expanded={browserOpen} aria-controls="role-browser-content" onClick={() => setBrowserOpen(!browserOpen)}>{browserOpen ? "Close list" : "Browse roles"}</button><button className="button secondary" onClick={() => add()}>New role</button></div><div className="role-browser-content" id="role-browser-content">
+        <label>Search roles<input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Name, prompt or tag" /></label>
         <label>Filter group<select value={groupFilter} onChange={(event) => setGroupFilter(event.target.value)}><option value="">All groups</option>{groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
-        <button className="button secondary" onClick={() => add()}>New role</button></div>
-      <div className="role-library-grid"><div className="role-list">{roles.filter((role) => (!groupFilter || role.groupIDs.includes(groupFilter)) && [role.name, role.text, role.systemPrompt ?? "", ...role.tags].join(" ").toLowerCase().includes(search.toLowerCase())).map((role) =>
-        <button className={role.id === selectedId ? "active" : ""} key={role.id} onClick={() => setSelectedId(role.id)}>{role.name}<small>{role.kind} · {role.effort ?? "default"}</small></button>)}</div>
-      {selected && <div className="role-detail"><label>Role name<input value={selected.name} onChange={(event) => update({ name: event.target.value })} /></label>
+        <div className="role-results"><span>{filtered.length} of {roles.length}</span>{(search || groupFilter) && <button className="text-button" onClick={clearFilters}>Clear filters</button>}</div>
+        <div className="role-list" aria-label="Roles">{filtered.map((role) =>
+          <button className={role.id === selected?.id ? "active" : ""} aria-pressed={role.id === selected?.id} key={role.id} onClick={() => { setSelectedId(role.id); setPendingAction(null); setBrowserOpen(false); }}><span className="role-list-name">{role.name || "Untitled role"}{assigned(role.id) && <span className="role-assigned-dot" title="Assigned to routing" />}</span><small>{role.kind === "classifier" ? "Classifier" : "Target"} · {role.effort ?? "Default effort"}</small></button>)}</div>
+        {!filtered.length && <div className="role-empty"><strong>{roles.length ? "No matching roles" : "Your library is empty"}</strong><p>{roles.length ? "Try another name, prompt or group." : "Create a role to describe a model's strengths."}</p></div>}
+      </div></aside>
+      {selected ? <div className="role-detail" key={selected.id}>
+        <header className="role-detail-heading"><div><div className="role-badges"><span>{selected.isBuiltIn ? "Built-in role" : "Custom role"}</span>{assigned(selected.id) && <span className="role-in-use">In use</span>}</div><h3>{selected.name || "Untitled role"}</h3></div><button className="button secondary" onClick={() => add(true)}>Duplicate role</button></header>
+        {!filtered.some((role) => role.id === selected.id) && <p className="role-filter-note">This role is outside the current filters. Your edits stay here. <button className="text-button" onClick={clearFilters}>Show in library</button></p>}
+        <section className="role-section"><div className="role-field-pair"><label>Role name<input ref={nameInput} value={selected.name} onChange={(event) => update({ name: event.target.value })} /></label>
         <label>Role kind<select value={selected.kind} disabled={assigned(selected.id)} onChange={(event) => update({ kind: event.target.value as RoutingRole["kind"] })}><option value="target">Target description</option><option value="classifier">Classifier template</option></select></label>
-        <label>{selected.kind === "classifier" ? "Classifier template (include {{targets}})" : "Routing description"}<textarea value={selected.text} onChange={(event) => update({ text: event.target.value })} /></label>
-        {selected.kind === "target" && <label>Model system prompt<textarea value={selected.systemPrompt ?? ""} onChange={(event) => update({ systemPrompt: event.target.value || null })} /></label>}
-        <label>Reasoning effort<select value={selected.effort ?? ""} onChange={(event) => update({ effort: event.target.value || null })}><option value="">Model default</option>{["low", "medium", "high", "xhigh", "max", "ultra"].map((effort) => <option key={effort}>{effort}</option>)}</select></label>
-        <label>Tags<input value={selected.tags.join(", ")} onChange={(event) => update({ tags: event.target.value.split(",").map((tag) => tag.trim().toLowerCase()).filter(Boolean) })} /></label>
-        <div className="group-memberships">{groups.map((group) => <label className="checkbox-label" key={group.id}><input type="checkbox" checked={selected.groupIDs.includes(group.id)} onChange={(event) => update({ groupIDs: event.target.checked ? [...selected.groupIDs, group.id] : selected.groupIDs.filter((id) => id !== group.id) })} />{group.name}</label>)}</div>
-        <div className="role-toolbar"><button className="button secondary" onClick={() => add(true)}>Duplicate role</button>
-          {builtInRoles.some((role) => role.id === selected.id) && <button className="button secondary" onClick={() => update({ ...builtInRoles.find((role) => role.id === selected.id)!, groupIDs: selected.groupIDs })}>Reset role</button>}
-          <button className="button secondary" disabled={assigned(selected.id)} onClick={() => { change({ roles: roles.filter((role) => role.id !== selected.id) }); setSelectedId(roles.find((role) => role.id !== selected.id)?.id); }}>Delete role</button></div>
-        {assigned(selected.id) && <small>Unassign this role before deleting it or changing its kind.</small>}
-      </div>}</div>
+        </div>{assigned(selected.id) && <p className="role-help">Unassign this role on Routing before changing its kind or deleting it.</p>}</section>
+        <section className="role-section"><h4>{selected.kind === "classifier" ? "Classifier template" : "Routing description"}</h4><p className="role-help" id="role-description-help">{selected.kind === "classifier" ? "Tell the classifier how to choose a target. Keep {{targets}} in the template so available targets can be inserted." : "Describe the tasks this model is best at. The router uses this to decide when to choose it."}</p>
+          <label className="role-prompt-label"><span className="sr-only">{selected.kind === "classifier" ? "Classifier template (include {{targets}})" : "Routing description"}</span><textarea aria-describedby="role-description-help" value={selected.text} onChange={(event) => update({ text: event.target.value })} placeholder="Describe the tasks and strengths this role should handle..." /></label></section>
+        <section className="role-section"><h4>Model behavior</h4><p className="role-help">{selected.kind === "target" ? "Instructions for the model after it is selected. These do not affect which model the router chooses." : "Choose the reasoning effort used by the classifier."}</p>
+          {selected.kind === "target" && <label><span>Model system prompt <span className="role-optional" aria-hidden="true">Optional</span></span><textarea aria-label="Model system prompt" value={selected.systemPrompt ?? ""} onChange={(event) => update({ systemPrompt: event.target.value || null })} placeholder="Leave empty to keep the model's default instructions." /></label>}
+          <label className="role-effort">Reasoning effort<select value={selected.effort ?? ""} onChange={(event) => update({ effort: event.target.value || null })}><option value="">Model default</option>{["low", "medium", "high", "xhigh", "max", "ultra"].map((effort) => <option key={effort}>{effort}</option>)}</select></label></section>
+        <section className="role-section"><h4>Organization</h4><label>Tags<input value={selected.tags.join(", ")} onChange={(event) => update({ tags: event.target.value.split(",").map((tag) => tag.trim().toLowerCase()).filter(Boolean) })} placeholder="coding, review, research" /></label><p className="role-help">Separate tags with commas. Tags and groups help organize your library.</p>
+          {groups.length > 0 ? <div className="group-memberships" role="group" aria-label="Role groups">{groups.map((group) => <label className="checkbox-label" key={group.id}><input type="checkbox" checked={selected.groupIDs.includes(group.id)} onChange={(event) => update({ groupIDs: event.target.checked ? [...selected.groupIDs, group.id] : selected.groupIDs.filter((id) => id !== group.id) })} />{group.name}</label>)}</div> : <p className="role-help">Create a project group below to organize related roles.</p>}</section>
+        <div className="role-maintenance"><span>Role actions</span><div className="role-toolbar">
+          {builtInRoles.some((role) => role.id === selected.id) && <button className="button secondary" onClick={() => setPendingAction({ id: selected.id, kind: "reset" })}>Reset role</button>}
+          <button className="button secondary role-delete" disabled={assigned(selected.id)} onClick={() => setPendingAction({ id: selected.id, kind: "delete" })}>Delete role</button></div></div>
+        {pendingAction?.id === selected.id && <div className="role-confirm" role="group" aria-label="Confirm role action"><p>{pendingAction.kind === "reset" ? `Reset ${selected.name} to its built-in values? Your edits to this role will be replaced. Group memberships are kept.` : `Delete ${selected.name} from the library? Save the library to make this permanent.`}</p><div className="role-toolbar"><button className="button secondary" onClick={() => setPendingAction(null)}>Cancel</button><button className="button secondary role-delete" disabled={pendingAction.kind === "delete" && assigned(selected.id)} onClick={() => {
+          if (pendingAction.kind === "reset") update({ ...builtInRoles.find((role) => role.id === selected.id)!, groupIDs: selected.groupIDs });
+          else { change({ roles: roles.filter((role) => role.id !== selected.id) }); setSelectedId(roles.find((role) => role.id !== selected.id)?.id); }
+          setPendingAction(null);
+        }}>{pendingAction.kind === "reset" ? "Confirm reset" : "Confirm delete"}</button></div></div>}
+      </div> : <div className="role-empty role-detail-empty"><h3>A role gives your model a purpose</h3><p>Create your first role, then assign it to a model on Routing.</p><button className="button secondary" onClick={() => add()}>Create first role</button></div>}</div>
       <details><summary>Project groups</summary><p className="editor-hint">Project paths are labels only: no folder is opened or used for automatic routing.</p>
         {groups.map((group) => <div className="editor-section" key={group.id}><label>Group name<input value={group.name} onChange={(event) => change({ roleGroups: groups.map((item) => item.id === group.id ? { ...item, name: event.target.value } : item) })} /></label>
           <label>Project path label<input value={group.projectPath} onChange={(event) => change({ roleGroups: groups.map((item) => item.id === group.id ? { ...item, projectPath: event.target.value } : item) })} /></label>

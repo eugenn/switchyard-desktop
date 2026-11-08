@@ -256,6 +256,47 @@ it("saves the role library even when routing models are incomplete", async () =>
   expect(api.start).not.toHaveBeenCalled();
 });
 
+it("keeps library edits on save failure and clears only library dirty state on retry", async () => {
+  vi.mocked(api.saveLibrary).mockRejectedValueOnce("Could not save library").mockResolvedValueOnce();
+  render(<App />);
+  const model = await screen.findByDisplayValue("test-small");
+  fireEvent.change(model, { target: { value: "unsaved-model" } });
+  openPage("Roles");
+  fireEvent.click(screen.getByRole("button", { name: "New role" }));
+  fireEvent.change(screen.getByLabelText("Role name"), { target: { value: "Retry reviewer" } });
+  expect(screen.getByText("Unsaved library changes")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Save role library" }));
+  await screen.findByText("Could not save library");
+  expect(screen.getByLabelText("Role name")).toHaveProperty("value", "Retry reviewer");
+  expect(screen.getByText("Unsaved library changes")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Save role library" }));
+  await screen.findByText("Library up to date");
+  openPage("Routing");
+  expect(screen.getByDisplayValue("unsaved-model")).toBeTruthy();
+  expect(screen.getByText(/You have unsaved changes; starting saves them/)).toBeTruthy();
+  expect(api.save).not.toHaveBeenCalled();
+});
+
+it("reads the saved library back on a fresh app mount", async () => {
+  let stored: RouteSettings = { ...settings };
+  vi.mocked(api.bootstrap).mockImplementation(async () => ({ settings: stored, runtime, login, session: stoppedSession }));
+  vi.mocked(api.saveLibrary).mockImplementation(async (roles, roleGroups) => { stored = { ...stored, roles, roleGroups }; });
+  const app = render(<App />);
+  await screen.findByDisplayValue("test-small");
+  openPage("Roles");
+  fireEvent.click(screen.getByRole("button", { name: "New role" }));
+  fireEvent.change(screen.getByLabelText("Role name"), { target: { value: "Saved reviewer" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save role library" }));
+  await screen.findByText(/Role library saved/);
+  app.unmount();
+  render(<App />);
+  await screen.findByDisplayValue("test-small");
+  openPage("Roles");
+  fireEvent.click(screen.getByRole("button", { name: /^Saved reviewer/ }));
+  expect(screen.getByLabelText("Role name")).toHaveProperty("value", "Saved reviewer");
+  expect(screen.getByText("Library up to date")).toBeTruthy();
+});
+
 it("starts with a routed profile: the Codex profile is part of every start, with no opt-in", async () => {
   vi.mocked(api.start).mockResolvedValue({ ...stoppedSession, running: true });
   render(<App />);
