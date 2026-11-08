@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-root = Path(__file__).resolve().parent.parent
+root = Path(__file__).resolve().parents[2]
 metadata = json.loads(subprocess.check_output(
     ['cargo', 'metadata', '--locked', '--format-version', '1'], cwd=root / 'vendor/switchyard'))
 output = Path(sys.argv[1])

@@ -1,7 +1,7 @@
 # Switchyard Desktop
 
 The sole application: Tauri 2 / React / Rust for macOS 14+ and Windows x64.
-The previous Swift implementation and its app/DMG build scripts are removed.
+This directory owns the frontend, Rust core, Tauri shell, runtime inputs and build tools.
 This remains a development preview with incomplete release acceptance, not a
 release-ready installer. See [current status](../docs/cross-platform.md).
 
@@ -16,7 +16,8 @@ npm run runtime
 npm run desktop
 ```
 
-If `build/litellm-runtime` is already prepared, avoid rebuilding Python with:
+If `build/litellm-runtime` within `desktop/` is already prepared, avoid rebuilding
+Python with:
 
 ```sh
 python3 scripts/prepare-runtime.py --reuse-python
@@ -240,8 +241,8 @@ including Custom cadence/fallback, stage transitions, native prompts, subagents,
 shared-model roles, random weights and eight Jev mock cases.
 
 The runtime smoke uses an offline provider and ephemeral ports, exercising
-streaming, non-streaming, stats and routing-log provenance through the existing
-bundle harness. The explicit ignored No-op integration test exercises real
+streaming, non-streaming, stats and routing-log provenance directly through
+`src-tauri/runtime`, without creating a legacy app bundle. The explicit ignored No-op integration test exercises real
 session startup/stop/profile rollback without auth on ephemeral ports. All test
 user locations and vaults are isolated. No check uses the real user account.
 

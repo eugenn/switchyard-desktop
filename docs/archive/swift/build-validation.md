@@ -1,8 +1,8 @@
 # Historical validation: retired application
 
 These are historical reports for the removed Swift app. They do not validate
-the current Tauri client or a new installer. See [current checks](../desktop/README.md#validation)
-and [release gates](releases.md). Source removal occurred on November 7, 2026.
+the current Tauri client or a new installer. See [current checks](../../../desktop/README.md#validation)
+and [release gates](../../releases.md). Source removal occurred on November 7, 2026.
 
 # Local build validation
 
@@ -25,7 +25,7 @@ and [release gates](releases.md). Source removal occurred on November 7, 2026.
   `git diff --check` pass. The GitHub workflow has not run: its files remain local.
 - GitHub visibility, branch protection, outside-contributor workflow approval,
   secret scanning/push protection and private vulnerability reporting were checked
-  through the API. See [GitHub maintenance](github.md) for bootstrap details.
+  through the API. See [GitHub maintenance](../../github.md) for bootstrap details.
 
 Logs: `build/open-source-swift-test.log`, `build/open-source-swift-build.log`,
 `build/open-source-package.log`. No commits, pushes or GitHub releases were made.

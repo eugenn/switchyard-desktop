@@ -2,7 +2,7 @@ switchyard-desktop
 Copyright 2026 switchyard-desktop contributors.
 
 Licensed under the Apache License, Version 2.0.
-See Licenses/SwitchyardDesktop/LICENSE and NOTICE. Third-party components
+See the repository LICENSE and NOTICE, retained with the application licenses. Third-party components
 retain their own licenses.
 
 This distribution is an independent utility. It is not affiliated with,

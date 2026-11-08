@@ -7,7 +7,7 @@ an independently maintained [core fork](https://github.com/eugenn/Switchyard).
 It is not affiliated with NVIDIA, OpenAI or Anthropic.
 
 The only application is now in [`desktop/`](desktop/README.md), built with Tauri,
-React and Rust. The old Swift application and its build scripts have been removed.
+React and Rust. Its source, runtime inputs, resources and build tools all live there.
 **This is a development preview, not a release-ready installer.** Old DMGs from
 GitHub Releases contain the retired application, not the current code. Build and
 run from source using the instructions below.
@@ -110,5 +110,5 @@ are complete. See [current status](docs/cross-platform.md).
 
 Original application code and assets are licensed under [Apache-2.0](LICENSE).
 Third-party components retain their own licenses; see [NOTICE](NOTICE),
-[dependency notices](Resources/THIRD-PARTY-NOTICES.txt) and `desktop/licenses/`.
+[dependency notices](desktop/resources/THIRD-PARTY-NOTICES.txt) and `desktop/licenses/`.
 Report vulnerabilities using [SECURITY.md](SECURITY.md).

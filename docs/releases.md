@@ -45,7 +45,7 @@ regression tests exercise this gate using disposable repositories.
 6. Add installer/update validation and checksums, then enable packaging only after
    all blockers in [the status ledger](cross-platform.md) are accepted.
 
-The retained signing/runtime helper scripts are building blocks, not a complete
+The signing/runtime helper scripts in `desktop/scripts/` are building blocks, not a complete
 Tauri release pipeline. Do not bypass missing gates by distributing an ad-hoc
-build as a verified release. Historical reports in `docs/releases/` describe only
+build as a verified release. Historical reports in `docs/archive/swift/` describe only
 the retired application's artifacts.

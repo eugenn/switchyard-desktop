@@ -3,12 +3,25 @@
 ## One application
 
 `desktop/` contains the only UI and application shell: React/TypeScript, a Rust
-library, and Tauri. The previous Swift package, application, tests and packaging
-entry points are removed. Do not restore a parallel implementation.
+library, and Tauri. Runtime inputs, app resources, configuration fixtures and
+build helpers also live there. Do not restore a parallel implementation.
 
 Start with [the application guide](../desktop/README.md). Native development uses
 `npm run desktop`; `npm run dev` is only a browser preview. Build Switchyard from
 `vendor/switchyard`, never from PATH or the sibling core checkout implicitly.
+
+## Repository layout
+
+- `desktop/src/`: React UI and frontend tests.
+- `desktop/core/`: Rust application logic and isolated integration tests.
+- `desktop/src-tauri/`: native shell, icons and staged runtime.
+- `desktop/runtime/`: pinned Python/LiteLLM source inputs, not generated binaries.
+- `desktop/configs/`: development examples and offline smoke fixtures.
+- `desktop/resources/` and `desktop/licenses/`: notices and dependency licenses.
+- `desktop/scripts/`: application runtime builders and validation helpers.
+- `desktop/build/`: ignored runtime build caches and local validation artifacts.
+- `scripts/` and `vendor/`: snapshot import, provenance checks and imported server.
+- `docs/archive/swift/`: historical validation and release reports, not build instructions.
 
 ## Core ownership and imports
 
@@ -37,15 +50,15 @@ npm run runtime
 npm run desktop
 ```
 
-On macOS, preparation calls the retained `scripts/build-switchyard.sh` and
-`scripts/build-litellm.sh` helpers. Those helpers are runtime builders, not
+On macOS, preparation calls the retained `desktop/scripts/build-switchyard.sh` and
+`desktop/scripts/build-litellm.sh` helpers. Those helpers are runtime builders, not
 application packagers. On Windows the preparation script builds the snapshot
 and stages native Python. The prepared runtime is ignored build output.
 Preparation refuses to overwrite an existing runtime. Move an obsolete runtime
 aside deliberately before rebuilding; never remove account directories.
 
 LiteLLM 1.97.0, FastAPI 0.136.3 and Python 3.12.10 remain pinned in
-`runtime/litellm/requirements.lock`. `uv` and compiler tools are build-time
+`desktop/runtime/litellm/requirements.lock`. `uv` and compiler tools are build-time
 requirements; nothing is installed at application startup.
 
 ## Test without accounts

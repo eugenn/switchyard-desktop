@@ -1,8 +1,9 @@
 #!/bin/sh
 set -eu
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+DESKTOP="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$DESKTOP/.." && pwd)"
 python3 "$ROOT/scripts/update-switchyard.py" --verify
-export CARGO_TARGET_DIR="$ROOT/build/switchyard-target"
+export CARGO_TARGET_DIR="$DESKTOP/build/switchyard-target"
 cd "$ROOT/vendor/switchyard"
 
 # macOS 14 is the app minimum, and it has to reach the compiled C in ring and
@@ -27,7 +28,7 @@ cp "$CARGO_TARGET_DIR/$HOST/release/switchyard-server" "$CARGO_TARGET_DIR/releas
 # cargo/ld's own linker-signed signature is rejected outright by taskgated on
 # some macOS versions ("Code Signature Invalid"), which kills the binary
 # before main() runs. Packaging re-signs the copy it bundles anyway
-# with scripts/sign-bundle.py; this ad-hoc re-sign lets this script's own smoke
+# with desktop/scripts/sign-bundle.py; this ad-hoc re-sign lets this script's own smoke
 # check, and a dev running the raw binary, launch it at all.
 codesign --sign - --force "$CARGO_TARGET_DIR/release/switchyard-server"
-"$CARGO_TARGET_DIR/release/switchyard-server" --config "$ROOT/configs/switchyard/smoke.toml" --dry-run
+"$CARGO_TARGET_DIR/release/switchyard-server" --config "$DESKTOP/configs/switchyard/smoke.toml" --dry-run

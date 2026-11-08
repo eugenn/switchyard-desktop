@@ -29,7 +29,8 @@
     "active": false,
     "resources": {
       "runtime/": "runtime/",
-      "../licenses/": "licenses/"
+      "../licenses/": "licenses/",
+      "../resources/": "notices/"
     },
     "macOS": {
       "minimumSystemVersion": "14.0"

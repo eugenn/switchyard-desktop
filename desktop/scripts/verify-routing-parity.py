@@ -9,7 +9,7 @@ import tempfile
 import threading
 
 ROOT = Path(__file__).resolve().parents[2]
-spec = importlib.util.spec_from_file_location("routing_parity", ROOT / "scripts/verify-routing-parity.py")
+spec = importlib.util.spec_from_file_location("routing_parity", Path(__file__).with_name("routing_parity.py"))
 parity = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(parity)
 

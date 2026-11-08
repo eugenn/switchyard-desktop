@@ -7,7 +7,7 @@ versions are recorded in desktop/package-lock.json and desktop/Cargo.lock.
 The bundled server comes from vendor/switchyard. Preserve its LICENSE, NOTICE,
 source manifest and dependency licenses. The runtime includes Python 3.12.10,
 LiteLLM 1.97.0 and FastAPI 0.136.3 with dependencies pinned in
-runtime/litellm/requirements.lock. Retain Python and package license metadata.
+desktop/runtime/litellm/requirements.lock. Retain Python and package license metadata.
 
 Complete collection of frontend, desktop Rust, server Rust and Python licenses
 is a release blocker; this notice is not a replacement for those license texts.

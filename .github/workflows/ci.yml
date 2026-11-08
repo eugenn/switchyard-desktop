@@ -28,7 +28,7 @@ jobs:
           python3 scripts/update-switchyard.py --verify
           python3 -m unittest discover -s scripts/tests -v
           python3 -m unittest discover -s desktop/scripts -p 'test_*.py' -v
-          for script in scripts/*.sh; do sh -n "$script"; done
+          for script in scripts/*.sh desktop/scripts/*.sh; do sh -n "$script"; done
           git diff --check
 
   macos:

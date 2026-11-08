@@ -84,7 +84,7 @@ are additive. Raw request details retain `target` and `reasoning_effort`. Routin
 outcome envelopes are excluded from usage records so they do not inflate call
 counts or produce unknown-model entries.
 
-Validate with `scripts/build-switchyard.sh`, then run `cargo test --locked -p
+Validate with `desktop/scripts/build-switchyard.sh`, then run `cargo test --locked -p
 switchyard-desktop-core` and `python3 scripts/verify-routing-parity.py` from
 `desktop/`. The offline harness uses Rust-generated configurations and local
 mocks, not the removed application. Public releases still require

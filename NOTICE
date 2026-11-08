@@ -13,7 +13,7 @@ See vendor/switchyard/LICENSE, vendor/switchyard/NOTICE, and
 vendor/switchyard-source.json for its license, notices, and exact provenance.
 
 The application bundles Python, LiteLLM, and other dependencies. See
-Resources/THIRD-PARTY-NOTICES.txt and the license files in the distribution.
+desktop/resources/THIRD-PARTY-NOTICES.txt and the license files in the distribution.
 
 This is an independent project, not affiliated with, endorsed by, or
 sponsored by NVIDIA, OpenAI or Anthropic. Their names and marks belong to their owners.

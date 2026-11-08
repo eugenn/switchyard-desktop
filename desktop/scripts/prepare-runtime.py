@@ -10,7 +10,9 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
-DESTINATION = ROOT / "desktop/src-tauri/runtime"
+DESKTOP = ROOT / "desktop"
+BUILD = DESKTOP / "build"
+DESTINATION = DESKTOP / "src-tauri/runtime"
 
 
 def run(arguments, **kwargs):
@@ -45,7 +47,7 @@ def prepare_claude_plugin():
     target = subprocess.check_output(["rustc", "-vV"], text=True)
     target = next(line.split(": ", 1)[1] for line in target.splitlines() if line.startswith("host: "))
     target_name = target.replace("-", "_")
-    target_dir = ROOT / "build/switchyard-target"
+    target_dir = BUILD / "switchyard-target"
     environment = dict(os.environ, CARGO_TARGET_DIR=str(target_dir))
     environment[f"CARGO_TARGET_{target_name.upper()}_RUSTFLAGS"] = "-C link-arg=-mmacosx-version-min=14.0"
     environment[f"CFLAGS_{target_name}"] = "-mmacosx-version-min=14.0"
@@ -91,15 +93,15 @@ def main():
     snapshot_path = ROOT / "vendor/switchyard-source.json"
     snapshot = json.loads(snapshot_path.read_text())
     if sys.platform == "darwin":
-        run(["sh", ROOT / "scripts/build-switchyard.sh"])
+        run(["sh", DESKTOP / "scripts/build-switchyard.sh"])
         if not args.reuse_python:
-            run(["sh", ROOT / "scripts/build-litellm.sh"])
-        server = ROOT / "build/switchyard-target/release/switchyard-server"
-        python_source = ROOT / "build/litellm-runtime"
+            run(["sh", DESKTOP / "scripts/build-litellm.sh"])
+        server = BUILD / "switchyard-target/release/switchyard-server"
+        python_source = BUILD / "litellm-runtime"
     else:
         if args.reuse_python:
             parser.error("--reuse-python is only supported for the macOS development runtime.")
-        server_target = ROOT / "build/cross-platform-switchyard"
+        server_target = BUILD / "switchyard-target"
         environment = dict(os.environ, CARGO_TARGET_DIR=str(server_target))
         run(["cargo", "build", "--locked", "--release", "-p", "switchyard-server"], cwd=ROOT / "vendor/switchyard", env=environment)
         server = server_target / "release/switchyard-server.exe"
@@ -120,9 +122,9 @@ def main():
             shutil.copytree(candidates[0], staged / "litellm", symlinks=True)
             python = staged / "litellm/python.exe"
             requirements = Path(temporary) / "requirements-windows.lock"
-            requirements.write_text(windows_requirements((ROOT / "runtime/litellm/requirements.lock").read_text()))
+            requirements.write_text(windows_requirements((DESKTOP / "runtime/litellm/requirements.lock").read_text()))
             run(["uv", "pip", "install", "--python", python, "--target", staged / "litellm/Lib/site-packages", "--require-hashes", "-r", requirements])
-        shutil.copy2(ROOT / "runtime/litellm/launcher.py", staged / "litellm/launcher.py")
+        shutil.copy2(DESKTOP / "runtime/litellm/launcher.py", staged / "litellm/launcher.py")
         sandbox = Path(temporary) / "check-user"
         sandbox.mkdir()
         environment = dict(os.environ, HOME=str(sandbox), USERPROFILE=str(sandbox),

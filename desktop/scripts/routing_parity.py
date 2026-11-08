@@ -3,7 +3,6 @@
 
 Only disposable loopback ports and temporary files are used. No provider calls.
 """
-import argparse
 import contextlib
 import http.server
 import json
@@ -17,7 +16,7 @@ import time
 import urllib.error
 import urllib.request
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 PROMPTS = ROOT / 'vendor/switchyard/crates/libsy/src/prompts'
 
 
@@ -282,14 +281,3 @@ def exercise(binary, directory):
     results.append(run_case(binary, directory, 'random', [opening] * 3, ['model-1'] * 3))
     random_path.write_text(random_path.read_text().split('\nweights =')[0])
     return results
-
-
-def main():
-    subprocess.run(
-        [os.sys.executable, str(ROOT / "desktop/scripts/verify-routing-parity.py")],
-        cwd=ROOT, check=True,
-    )
-
-
-if __name__ == '__main__':
-    main()

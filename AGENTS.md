@@ -1,6 +1,7 @@
 # Development ownership
 
 - switchyard-desktop is a standalone Tauri / React / Rust app for macOS and Windows, with its own bundled Switchyard server.
+- Keep app resources, runtime inputs, configuration fixtures and build/test helpers in `desktop/`; root `scripts/` is for snapshot provenance.
 - Maintain one application in `desktop/`, with no parallel Swift implementation or edition selector. Installer generation stays disabled until release acceptance is complete.
 - All server development happens first in `../NVIDIA` (relative to this checkout).
 - Do not implement, commit, or push core changes in `../NVIDIA` or `eugenn/Switchyard` from desktop tasks. Record proposed core changes in a Markdown file only; the user manages core development and publication.
