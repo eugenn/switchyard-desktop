@@ -1,0 +1,40 @@
+<!-- Switchyard app icon foreground on the 1024 macOS icon grid (824 tile at offset 100).
+     The graphite tile, accent glow and drop shadow are drawn by scripts/build-app-icon.py with dithering,
+     because SVG gradients this dark band visibly. Colors follow the accent (efficient), capable, judge,
+     ink and win tokens in src/styles.css. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e0f0e8" stop-opacity="0.22"/>
+      <stop offset="0.5" stop-color="#e0f0e8" stop-opacity="0.06"/>
+      <stop offset="1" stop-color="#e0f0e8" stop-opacity="0.10"/>
+    </linearGradient>
+    <linearGradient id="laneCapable" gradientUnits="userSpaceOnUse" x1="300" y1="0" x2="760" y2="0">
+      <stop offset="0.35" stop-color="#cfdcd5"/><stop offset="1" stop-color="#6aa5ec"/>
+    </linearGradient>
+    <linearGradient id="laneEfficient" gradientUnits="userSpaceOnUse" x1="300" y1="0" x2="760" y2="0">
+      <stop offset="0.35" stop-color="#cfdcd5"/><stop offset="1" stop-color="#4fc98a"/>
+    </linearGradient>
+    <linearGradient id="laneJudge" gradientUnits="userSpaceOnUse" x1="300" y1="0" x2="760" y2="0">
+      <stop offset="0.35" stop-color="#cfdcd5"/><stop offset="1" stop-color="#e0b066"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="102" y="102" width="820" height="820" rx="183" fill="none" stroke="url(#rim)" stroke-width="4"/>
+
+  <g fill="none" stroke-width="36" stroke-linecap="round">
+    <path d="M300 512 H430 C520 512 540 352 640 352 H760" stroke="url(#laneCapable)"/>
+    <path d="M430 512 C540 512 540 672 640 672 H760" stroke="url(#laneJudge)"/>
+    <path d="M300 512 H760" stroke="url(#laneEfficient)"/>
+  </g>
+
+  <!-- input node: the toolbar's live dot -->
+  <circle cx="300" cy="512" r="88" fill="#4fc98a" fill-opacity="0.16"/>
+  <circle cx="300" cy="512" r="56" fill="#0e1211" stroke="#e9f1ec" stroke-width="22"/>
+  <circle cx="300" cy="512" r="24" fill="#4fc98a"/>
+
+  <!-- route targets: capable / efficient / judge -->
+  <circle cx="760" cy="352" r="50" fill="#6aa5ec"/>
+  <circle cx="760" cy="512" r="50" fill="#4fc98a"/>
+  <circle cx="760" cy="672" r="50" fill="#e0b066"/>
+</svg>
