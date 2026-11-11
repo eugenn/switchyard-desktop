@@ -313,18 +313,35 @@ export function ticks(records: LogRecord[], sessionID: string | null, start: num
   return new Map([...placed].map(([model, list]) => [model, list.sort((a, b) => a.position - b.position).map((item) => ({ position: item.position, weight: Math.sqrt(item.total / heaviest) }))]));
 }
 export interface ContextUsage { inputTokens: number | null; contextWindow: number | null; fraction: number | null }
-export function contextUsage(records: LogRecord[], sessionID: string, contextWindow: number | null): Map<string, ContextUsage> {
+export function contextUsage(records: LogRecord[], sessionID: string, settings: RouteSettings, table: PriceTable | null = null): Map<string, ContextUsage> {
   const newest = new Map<string, LogRecord>();
   for (const record of records) {
     if (record.isClassifier || record.sessionID !== sessionID) continue;
     const existing = newest.get(record.modelIdentity);
     if (!existing || (record.ts != null && existing.ts != null && record.ts > existing.ts)) newest.set(record.modelIdentity, record);
   }
-  const window = contextWindow && contextWindow > 0 ? contextWindow : null;
   return new Map([...newest].map(([model, record]) => {
     const input = record.contextInputTokens;
+    const window = contextWindowFor(model, settings, table);
     return [model, { inputTokens: input, contextWindow: window, fraction: input != null && input >= 0 && window ? input / window : null }];
   }));
+}
+
+const validWindow = (value: unknown): number | null => typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null;
+/** Account metadata wins over public defaults; explicit route limits still cap the meter. */
+export function contextWindowFor(model: string, settings: RouteSettings, table: PriceTable | null): number | null {
+  let window = validWindow(settings.discoveredModels?.find((entry) => entry.id === model)?.contextWindow);
+  if (window == null && table) {
+    for (const candidate of modelCandidates(model)) {
+      const entry = table[candidate];
+      window = validWindow(entry?.max_input_tokens) ?? validWindow(entry?.max_tokens);
+      if (window != null) break;
+    }
+  }
+  const explicit = validWindow(settings.contextWindow);
+  if (explicit != null) window = window == null ? explicit : Math.min(window, explicit);
+  if (settings.allowsLongContext === false) window = Math.min(window ?? 272000, 272000);
+  return window;
 }
 
 // ---------- server stats (SwitchyardStatsClient) ----------
@@ -365,11 +382,13 @@ export function parseStats(raw: unknown): ServerStats {
 export type PriceTable = Record<string, Record<string, number>>;
 const isPriced = (costs: Record<string, number> | undefined) => !!costs && costs.input_cost_per_token != null && costs.output_cost_per_token != null;
 /** The id itself, then without its provider, then under the provider LiteLLM infers for a bare name. */
-export function priceFor(model: string, table: PriceTable): Record<string, number> | null {
+function modelCandidates(model: string): string[] {
   const id = model.toLowerCase();
   const slash = id.indexOf("/");
-  const candidates = [id, ...(slash >= 0 ? [id.slice(slash + 1)] : []), ...["openai", "anthropic", "gemini"].map((provider) => `${provider}/${id}`)];
-  for (const candidate of candidates) if (isPriced(table[candidate])) return table[candidate];
+  return [id, ...(slash >= 0 ? [id.slice(slash + 1)] : []), ...["openai", "anthropic", "gemini"].map((provider) => `${provider}/${id}`)];
+}
+export function priceFor(model: string, table: PriceTable): Record<string, number> | null {
+  for (const candidate of modelCandidates(model)) if (isPriced(table[candidate])) return table[candidate];
   return null;
 }
 function threshold(key: string): { label: string; tokens: number } | null {

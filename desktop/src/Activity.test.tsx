@@ -11,6 +11,25 @@ vi.mock("./api", async (original) => {
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 
 describe("activity parity", () => {
+  it("updates context meters when model metadata and later turns arrive with no explicit context setting", async () => {
+    vi.mocked(api.history).mockResolvedValue([{ session_id: "real", model: "m", ts: 100, prompt_tokens: 64000 }]);
+    let refresh!: (table: Record<string, Record<string, number>>) => void;
+    vi.mocked(api.modelPrices).mockImplementation(async (remote) => remote
+      ? new Promise((resolve) => { refresh = resolve; })
+      : {});
+    const props = { settings: { algorithm: "passthrough" as const, efficientModel: "m", capableModel: "" }, stats: null, statsError: "", running: false, onOpenRequests: () => {}, onConfigure: () => {} };
+    const { rerender } = render(<Activity {...props} />);
+    expect(await screen.findByText("64K / —")).toBeTruthy();
+    await waitFor(() => expect(refresh).toBeTypeOf("function"));
+    refresh({ m: { max_input_tokens: 128000 } });
+    expect(await screen.findByText("64K / 128K")).toBeTruthy();
+    expect(screen.getByText("50%")).toBeTruthy();
+    vi.mocked(api.history).mockResolvedValue([{ session_id: "real", model: "m", ts: 200, prompt_tokens: 96000 }]);
+    rerender(<Activity {...props} running />);
+    expect(await screen.findByText("96K / 128K")).toBeTruthy();
+    expect(screen.getByText("75%")).toBeTruthy();
+  });
+
   it("refreshes prices and excludes naming threads before choosing a session and pricing its judge", async () => {
     vi.mocked(api.history).mockResolvedValue([
       { origin: "codex-cli", session_id: "naming", model: "gpt-6.1-sol", ts: 200, prompt_tokens: 50 },

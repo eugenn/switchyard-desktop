@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { callCost, computeMetrics, dollars, droppingHousekeepingThreads, durationText, estimateCost, priceFor, lanes, parseRecord, parseRecords, parseStats, profile, sessions, ticks } from "./activityModel";
+import { callCost, computeMetrics, contextUsage, contextWindowFor, dollars, droppingHousekeepingThreads, durationText, estimateCost, priceFor, lanes, parseRecord, parseRecords, parseStats, profile, sessions, ticks } from "./activityModel";
 import type { RouteSettings } from "./api";
 
 const at = (minute: number) => new Date(Date.UTC(2026, 10, 7, 13, minute)).toISOString();
@@ -59,6 +59,43 @@ describe("metrics", () => {
     expect(placed.get("big")).toEqual([{ position: 1, weight: 1 }]);
     expect(placed.get("small")![0]).toEqual({ position: 0.1, weight: 0.5 });
     expect(placed.has("judge")).toBe(false);
+  });
+});
+
+describe("model context", () => {
+  const settings: RouteSettings = { algorithm: "stage_router", efficientModel: "small", capableModel: "big" };
+  const table = { small: { max_input_tokens: 100000 }, big: { max_input_tokens: 1000000 } };
+
+  it("uses each model's limit and latest input in the selected session, excluding classifier calls", () => {
+    const records = parseRecords([
+      { model: "small", session_id: "s", ts: 1, prompt_tokens: 1000 },
+      { model: "small", session_id: "s", ts: 2, prompt_tokens: 50000 },
+      { model: "big", session_id: "s", ts: 3, prompt_tokens: 200000 },
+      { model: "small", session_id: "s", ts: 4, prompt_tokens: 50, tier: "classifier" },
+      { model: "small", session_id: "other", ts: 5, prompt_tokens: 10 },
+    ]);
+    const usage = contextUsage(records, "s", settings, table);
+    expect(usage.get("small")).toEqual({ inputTokens: 50000, contextWindow: 100000, fraction: 0.5 });
+    expect(usage.get("big")).toEqual({ inputTokens: 200000, contextWindow: 1000000, fraction: 0.2 });
+  });
+
+  it("prefers account metadata, respects explicit caps and keeps unknown models unknown", () => {
+    const discoveredModels = [{ id: "small", displayName: "Small", supportsImages: true, contextWindow: 128000, efforts: [] }];
+    expect(contextWindowFor("small", { ...settings, discoveredModels }, table)).toBe(128000);
+    expect(contextWindowFor("small", { ...settings, discoveredModels, contextWindow: 64000 }, table)).toBe(64000);
+    expect(contextWindowFor("small", { ...settings, contextWindow: 200000 }, table)).toBe(100000);
+    expect(contextWindowFor("big", { ...settings, allowsLongContext: false }, table)).toBe(272000);
+    expect(contextWindowFor("unknown", settings, table)).toBeNull();
+    expect(contextWindowFor("unknown", { ...settings, contextWindow: 128000 }, null)).toBe(128000);
+    expect(contextWindowFor("small", { ...settings, discoveredModels }, null)).toBe(128000);
+  });
+
+  it("reads provider entries without prices and ignores invalid limits", () => {
+    const metadata = { "openai/gpt-x": { max_input_tokens: 128000, max_tokens: 4096 }, legacy: { max_tokens: 8192 }, invalid: { max_input_tokens: -1, max_tokens: NaN } };
+    expect(contextWindowFor("GPT-X", settings, metadata)).toBe(128000);
+    expect(contextWindowFor("openai/legacy", settings, metadata)).toBe(8192);
+    expect(contextWindowFor("invalid", { ...settings, contextWindow: Infinity }, metadata)).toBeNull();
+    expect(priceFor("gpt-x", metadata)).toBeNull();
   });
 });
 

@@ -1,6 +1,6 @@
 //! LiteLLM's list prices, refreshed daily with a cached or bundled fallback.
 //! Model price table: reserved keys are dropped,
-//! only numeric `*cost*` fields are kept, ids are lower-cased and each entry's
+//! Numeric `*cost*` and context-limit fields are kept, ids are lower-cased and each entry's
 //! `aliases` become ids of their own unless a real entry already claims them.
 
 use std::collections::BTreeMap;
@@ -152,7 +152,9 @@ pub fn parse_price_map(text: &str) -> Result<ModelPrices> {
         };
         let costs = entry
             .iter()
-            .filter(|(key, _)| key.contains("cost"))
+            .filter(|(key, _)| {
+                key.contains("cost") || matches!(key.as_str(), "max_input_tokens" | "max_tokens")
+            })
             .filter_map(|(key, value)| number(value).map(|number| (key.clone(), number)))
             .collect::<BTreeMap<_, _>>();
         for alias in entry
@@ -253,19 +255,21 @@ mod tests {
     }
 
     #[test]
-    fn keeps_costs_and_aliases_and_drops_reserved_keys() {
+    fn keeps_costs_context_limits_and_aliases_and_drops_reserved_keys() {
         let prices = parse_price_map(
             r#"{
                 "sample_spec": {"input_cost_per_token": 1},
                 "GPT-X": {"input_cost_per_token": 0.000002, "output_cost_per_token": "0.000008",
-                          "max_tokens": 9, "supports_vision": true, "aliases": ["gpt-x-latest", "taken"]},
+                          "max_tokens": 9, "max_input_tokens": "128000", "supports_vision": true, "aliases": ["gpt-x-latest", "taken"]},
                 "taken": {"mode": "chat"}
             }"#,
         )
         .unwrap();
         assert!(!prices.contains_key("sample_spec"));
         assert_eq!(prices["gpt-x"]["output_cost_per_token"], 0.000008);
-        assert!(!prices["gpt-x"].contains_key("max_tokens"));
+        assert_eq!(prices["gpt-x"]["max_tokens"], 9.0);
+        assert_eq!(prices["gpt-x"]["max_input_tokens"], 128000.0);
+        assert!(!prices["gpt-x"].contains_key("supports_vision"));
         assert_eq!(prices["gpt-x-latest"], prices["gpt-x"]);
         assert!(prices["taken"].is_empty());
     }

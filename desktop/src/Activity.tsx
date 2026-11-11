@@ -82,7 +82,7 @@ export function Activity({ settings, stats: rawStats, statsError, running, onOpe
     <Summary metrics={metrics} stats={stats} session={flowSession} lastRefresh={lastRefresh} cost={cost} pricesError={pricesError} />
     <SignalBox metrics={metrics} modelIDs={modelIDs} isRouting={running} asOf={lastRefresh} usesClassifier={profile.usesClassifier} classifierModelID={profile.classifierModelID}
       roles={profile.roles} ticks={deriveTicks(records, flowSession?.id ?? null, metrics.windowStart, metrics.windowEnd)}
-      context={flowSession ? contextUsage(records, flowSession.id, settings.contextWindow ?? null) : null} session={flowSession} sessions={sessions} active={active}
+      context={flowSession ? contextUsage(records, flowSession.id, settings, prices) : null} session={flowSession} sessions={sessions} active={active}
       selectedModelID={selectedModelID} onSelectModel={setSelectedModelID} onSelectSession={setSelectedSessionID} onConfigure={onConfigure} />
     <div className="activity-pair">
       <LatencyCard stats={stats} modelIDs={modelIDs} selectedModelID={selectedModelID} onShowAll={() => setSelectedModelID(null)} />
@@ -245,7 +245,7 @@ function Lane({ lane, modelIDs, role, ticks, context, isLatest, isLive, pulses, 
 function ContextMeter({ usage, idle }: { usage: ContextUsage | null; idle: boolean }) {
   const fraction = usage?.fraction ?? null;
   const alarm = fraction == null ? "var(--tint)" : fraction >= 0.95 ? "var(--crit)" : fraction >= 0.8 ? "var(--warn)" : "var(--tint)";
-  return <span className="context-meter" style={{ width: CONTEXT }} title={fraction == null ? "No context reading for this model in the session yet." : "Input tokens of the session's latest turn on this model, against its context window."}>
+  return <span className="context-meter" style={{ width: CONTEXT }} title={usage?.inputTokens == null ? "No context reading for this model in the session yet." : usage.contextWindow == null ? "Input tokens are available, but this model's context window is unknown." : "Input tokens of the session's latest turn on this model, against its context window."}>
     <span className="context-row"><small>{idle ? "last context" : "context"}</small><b style={{ color: fraction != null && fraction >= 0.8 && !idle ? alarm : undefined }}>{fraction == null ? "—" : `${Math.round(fraction * 100)}%`}</b></span>
     <span className="context-bar"><i style={{ width: `${Math.min(Math.max(fraction ?? 0, 0), 1) * 100}%`, background: idle ? "rgba(109,125,118,.5)" : alarm }} /></span>
     <code>{usage?.inputTokens != null ? compact(usage.inputTokens) : "—"} / {usage?.contextWindow ? compact(usage.contextWindow) : "—"}</code>
