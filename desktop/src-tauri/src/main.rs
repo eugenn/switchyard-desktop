@@ -1,8 +1,7 @@
 use serde::Serialize;
 use switchyard_desktop_core::{
-    ClaudeIntegration, ClaudeSettings, ClaudeStatus, ConfigurationPreview, DesktopSession,
-    LoginStatus, PreparedClaudePlugin, RouteSettings, RuntimeLayout, RuntimeStatus, SessionStatus,
-    UserDataLocations,
+    ClaudeSettings, ConfigurationPreview, DesktopSession, LoginStatus, RouteSettings,
+    RuntimeLayout, RuntimeStatus, SessionStatus, UserDataLocations,
 };
 use tauri::{Manager, State};
 use tokio::sync::Mutex;
@@ -11,41 +10,38 @@ struct DesktopState {
     locations: UserDataLocations,
     runtime: RuntimeLayout,
     session: Mutex<DesktopSession>,
-    claude: Mutex<ClaudeIntegration>,
 }
 
 #[tauri::command]
-async fn claude_settings(state: State<'_, DesktopState>) -> Result<ClaudeSettings, String> {
-    state.claude.lock().await.settings()
+fn claude_settings(state: State<'_, DesktopState>) -> Result<ClaudeSettings, String> {
+    ClaudeSettings::load(&state.locations)
 }
 
 #[tauri::command]
-async fn claude_status(
+fn save_claude_settings(
     settings: ClaudeSettings,
     state: State<'_, DesktopState>,
-) -> Result<ClaudeStatus, String> {
-    state.claude.lock().await.status(&settings).await
+) -> Result<(), String> {
+    settings.save(&state.locations)
 }
 
 #[tauri::command]
-async fn claude_login(
+async fn claude_launch_command(
     settings: ClaudeSettings,
     state: State<'_, DesktopState>,
-) -> Result<ClaudeStatus, String> {
-    state.claude.lock().await.begin_login(&settings)
+) -> Result<String, String> {
+    let port = state.session.lock().await.router_port();
+    settings.launch_command(port)
 }
 
 #[tauri::command]
-async fn claude_cancel_login(state: State<'_, DesktopState>) -> Result<ClaudeStatus, String> {
-    Ok(state.claude.lock().await.cancel_login())
+async fn anthropic_key_status(state: State<'_, DesktopState>) -> Result<bool, String> {
+    state.session.lock().await.has_anthropic_key()
 }
 
 #[tauri::command]
-async fn prepare_claude(
-    settings: ClaudeSettings,
-    state: State<'_, DesktopState>,
-) -> Result<PreparedClaudePlugin, String> {
-    state.claude.lock().await.prepare(&settings).await
+async fn save_anthropic_key(key: String, state: State<'_, DesktopState>) -> Result<(), String> {
+    state.session.lock().await.set_anthropic_key(&key)
 }
 
 #[derive(Serialize)]
@@ -185,22 +181,20 @@ fn main() {
             let runtime = RuntimeLayout::bundled(runtime_root);
             let session = DesktopSession::new(locations.clone(), runtime.clone())
                 .map_err(std::io::Error::other)?;
-            let claude = ClaudeIntegration::new(locations.clone(), runtime.clone());
             app.manage(DesktopState {
                 locations,
                 runtime,
                 session: Mutex::new(session),
-                claude: Mutex::new(claude),
             });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             bootstrap,
             claude_settings,
-            claude_status,
-            claude_login,
-            claude_cancel_login,
-            prepare_claude,
+            save_claude_settings,
+            claude_launch_command,
+            anthropic_key_status,
+            save_anthropic_key,
             preview_configuration,
             save_settings,
             save_role_library,
@@ -225,7 +219,6 @@ fn main() {
             if matches!(event, tauri::RunEvent::Exit) {
                 let state = app.state::<DesktopState>();
                 tauri::async_runtime::block_on(async {
-                    state.claude.lock().await.cancel_login();
                     state.session.lock().await.stop();
                 });
             }

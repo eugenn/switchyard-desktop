@@ -9,19 +9,16 @@ use crate::{Result, RoleGroup, RouteSettings, RoutingRole};
 pub struct UserDataLocations {
     root: PathBuf,
     codex_home: PathBuf,
-    claude_home: PathBuf,
     user_home: PathBuf,
 }
 
 impl UserDataLocations {
     pub fn injected(root: PathBuf) -> Self {
         let codex_home = root.join("codex");
-        let claude_home = root.join("claude");
         let user_home = root.join("home");
         Self {
             root,
             codex_home,
-            claude_home,
             user_home,
         }
     }
@@ -59,9 +56,6 @@ impl UserDataLocations {
             locations.codex_home = std::env::var_os("CODEX_HOME")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| home.join(".codex"));
-            locations.claude_home = std::env::var_os("CLAUDE_CONFIG_DIR")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| home.join(".claude"));
             locations.user_home = home;
             Ok(locations)
         }
@@ -71,8 +65,31 @@ impl UserDataLocations {
         &self.codex_home
     }
 
-    pub fn claude_home(&self) -> &Path {
-        &self.claude_home
+    /// `PATH` for launching the user's own CLIs (Codex). An app
+    /// started from Finder or the Start menu gets a minimal `PATH` without the
+    /// directories these tools install into, so the usual ones are appended.
+    pub fn tool_search_path(&self) -> std::ffi::OsString {
+        let inherited = std::env::var_os("PATH").unwrap_or_default();
+        let mut directories: Vec<PathBuf> = std::env::split_paths(&inherited).collect();
+        let home = &self.user_home;
+        let mut usual = vec![
+            home.join(".local/bin"),
+            home.join(".npm-global/bin"),
+            home.join(".bun/bin"),
+            home.join(".volta/bin"),
+            home.join(".cargo/bin"),
+        ];
+        if cfg!(windows) {
+            usual.push(home.join("AppData/Roaming/npm"));
+        } else {
+            usual.extend(["/opt/homebrew/bin", "/usr/local/bin"].map(PathBuf::from));
+        }
+        for directory in usual {
+            if !directories.contains(&directory) {
+                directories.push(directory);
+            }
+        }
+        std::env::join_paths(directories).unwrap_or(inherited)
     }
 
     pub fn user_home(&self) -> &Path {
@@ -138,11 +155,24 @@ mod tests {
     use crate::Algorithm;
 
     #[test]
+    fn user_tools_are_found_from_a_minimal_path() {
+        let root = std::env::temp_dir().join("switchyard-locations-test");
+        let locations = UserDataLocations::injected(root.clone());
+        let directories: Vec<PathBuf> =
+            std::env::split_paths(&locations.tool_search_path()).collect();
+        assert!(directories.contains(&root.join("home/.local/bin")));
+        #[cfg(unix)]
+        assert!(directories.contains(&PathBuf::from("/opt/homebrew/bin")));
+        let inherited: Vec<PathBuf> =
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect();
+        assert_eq!(directories[..inherited.len()], inherited[..]);
+    }
+
+    #[test]
     fn default_locations_never_resolve_the_real_user_home_in_tests() {
         let locations = UserDataLocations::current().unwrap();
         assert!(locations.root().starts_with(std::env::temp_dir()));
         assert_eq!(locations.codex_home(), locations.root().join("codex"));
-        assert_eq!(locations.claude_home(), locations.root().join("claude"));
         assert_eq!(locations.user_home(), locations.root().join("home"));
         assert!(
             locations

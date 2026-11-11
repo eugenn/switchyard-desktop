@@ -32,112 +32,84 @@ application startup. The generated runtime is ignored by Git.
 `npm run dev` opens the UI in a browser without native capabilities. The browser
 explicitly labels this mode, disables native actions and never invents metrics.
 
-## Claude Code subscription routing
+## Claude Code routing with an Anthropic API key
 
-**Development preview, macOS only.** This feature is in the source app in
-this folder. Previously published DMGs contain the retired application. Real-account testing is
-still needed; the automated checks do not verify a live Claude conversation.
+**Development preview.** Real-account testing is still needed: the automated checks
+use a fake key and do not contact Anthropic. Claude Code routing uses an
+**Anthropic API key**, billed to your Anthropic API account. It does not use a
+Claude subscription: the app has no Claude Code sign-in, plug-in or "mods" step.
 
 ### What this does
 
-**Claude Code** is Anthropic's program for working with code in Terminal. It is
-separate from the Claude website and the Claude desktop app. Switchyard adds a
-small plug-in to Claude Code that chooses between two Claude models as you work:
-one for routine tasks and one for more demanding tasks.
+**Claude Code** is Anthropic's program for working with code in Terminal. This
+feature points it at the app's local Switchyard server (`127.0.0.1:4100`), the
+same server Codex uses. The server selects between two Claude models you choose
+(one for routine tasks, one for more demanding tasks) and calls Anthropic itself
+with your key, including the classifier calls that make the choice.
 
-**You do not enter an API key.** You sign in with your Claude account through
-Claude Code. Claude Code handles sign-in and sends the requests itself;
-Switchyard does not read or copy your sign-in tokens. Your account must include
-Claude Code access and access to both models you choose. Account usage limits
-still apply, and the routing decisions can also use Claude requests. This is
-not a promise of unlimited usage or lower cost.
+- The key is saved in macOS Keychain or Windows Credential Manager, never in JSON,
+  generated TOML or the launch command. Only the managed server receives it, in its
+  environment. Claude Code never sees it; it sends a placeholder token that the
+  server ignores.
+- Requests appear in **Activity** and **Requests** with origin `claude-code`.
+- Routing uses the bundled Composite policy. The Codex strategy editor does not
+  change it.
+- Anthropic usage and rate limits apply to your key. Classifier calls are extra
+  requests on that key.
 
-Unlike the Codex integration, this does **not** turn the app's server into a
-Claude API endpoint. Other programs cannot send Claude subscription requests
-through the Codex proxy. Claude activity also does not appear in the app's
-HTTP proxy statistics.
+### Set up and start working
 
-### One-time preparation
-
-1. Install Claude Code **2.1.301 or newer** separately and enable its **mods**
-   feature. Mods allow Claude Code to load the Switchyard add-on.
-2. Prepare the development app and its runtime using **Run on macOS** above.
-3. Stop the development app before adding the Claude plug-in. From the
-   repository root, run:
+1. Open **Routing**, then **Set up Claude**.
+2. Enter your Anthropic API key and click **Save API key**. The field clears and
+   shows only whether a key is saved. **Remove API key** deletes it from the vault.
+3. Enter two exact model IDs your account can use (machine-readable names starting
+   with `claude-`): **Efficient** for routine tasks and **Capable** for demanding
+   ones. The app does not look models up or guess them. Click **Save Claude setup**.
+   Clearing both fields turns the Claude Code route off.
+4. Start routing (**Save and start**). The Claude Code route is added to the server
+   only while both models and a key are saved, and only for that run: change the
+   setup, then stop and start again.
+5. Copy the launch command from **Set up Claude**, open Terminal in your project
+   folder and run it. It looks like this (POSIX shell):
 
    ```sh
-   cd desktop
-   python3 scripts/prepare-runtime.py --claude-plugin
-   npm run desktop
+   ANTHROPIC_BASE_URL='http://127.0.0.1:4100' ANTHROPIC_AUTH_TOKEN='switchyard-local' \
+   ANTHROPIC_MODEL='switchyard-claude' ANTHROPIC_DEFAULT_OPUS_MODEL='switchyard-claude' \
+   ANTHROPIC_DEFAULT_SONNET_MODEL='switchyard-claude' ANTHROPIC_DEFAULT_HAIKU_MODEL='switchyard-claude' \
+   ANTHROPIC_CUSTOM_HEADERS='x-switchyard-origin: claude-code' claude
    ```
 
-   If your Terminal is already in `desktop`, skip `cd desktop`. This builds the
-   add-on from the Switchyard source included in this repository. The script
-   refuses to overwrite an existing `desktop/src-tauri/runtime/claude-plugin`
-   folder. If you need to rebuild it, move that folder aside first.
+   `switchyard-claude` is the route name, not a model. It is how Claude Code asks the
+   server to choose. Claude Code may log `unrecognized_model` for that name.
+   The variables apply to that one Claude Code session only; your own Claude
+   Code configuration and sign-in are not changed.
 
-Use the native development app (`npm run desktop`), not the browser-only preview
-(`npm run dev`): the browser cannot sign in or prepare Claude routing.
+Starting routing still needs the ChatGPT sign-in unless the Codex algorithm is
+**Noop**, because the server and LiteLLM gateway start together. For a
+Claude-only setup, choose the Noop algorithm.
 
-### Connect your account and start working
+### Not verified yet
 
-1. In the development app, open **Routing**, then **Set up Claude**.
-2. Click **Check Claude account**. If Claude Code cannot be found, enter the
-   full path to its executable in **Claude Code executable** and check again.
-   Otherwise, leave that field empty.
-3. If you are not signed in, click **Sign in with Claude Code** and complete
-   sign-in in the browser. Return to the app and check the account again.
-   This flow requires a Claude subscription sign-in, not an API-key sign-in.
-4. Enter two exact model IDs that your account can use. A model ID is the
-   machine-readable name starting with `claude-`, not a friendly display name:
-   - **Efficient Claude model ID**: the model for routine tasks.
-   - **Capable Claude model ID**: the model for more demanding tasks.
-
-   The app does not discover these models automatically or grant access to
-   them. Use IDs supported by your installed Claude Code and your account.
-5. Click **Prepare Claude routing**, then **Copy command**. Preparing creates
-   a launch command; it does not start Claude Code yet.
-6. Open Terminal and go to the project folder you want Claude Code to work in.
-   Paste the copied command and press Return. Approve the plug-in if prompted.
-   Continue working in that Claude Code session.
-
-You do not need to start the Codex route for this to work. Claude Code runs
-separately: closing the desktop app does not end your Claude Code session.
-
-### Pause routing or change models
-
-Type these commands **inside Claude Code**, not in the desktop app:
-
-| Command | What it does |
-| --- | --- |
-| `/switchyard` | Shows the current routing status. |
-| `/switchyard off` | Pauses automatic model switching. |
-| `/switchyard on` | Enables automatic switching for the next request. |
-
-Choosing a model manually in Claude Code also pauses automatic switching.
-To change your two model IDs, update them in the app, prepare routing again,
-and start a new Claude Code session with the new command. Existing sessions
-keep their previous settings.
-
-This integration uses the bundled **Composite** routing policy: the rules that
-choose between Efficient and Capable. The Codex algorithm editor does not change
-these rules. Windows support is not available yet.
+- A full Claude Code conversation with a real key: tool use, streaming, extended
+  thinking and context limits through the route.
+- Whether Claude Code limits any features for the unrecognized route name.
+- That a Claude Code that is already signed in with a subscription uses the
+  placeholder token instead of that sign-in for the launched session. The smoke
+  run used an empty, isolated Claude Code configuration.
+- Windows: the launch command above is POSIX shell only.
 
 ### Developer checks
 
-From `desktop`, run these checks without Claude sign-in or subscription requests:
+From `desktop`, run these without any account, key or network:
 
 ```sh
 cargo test -p switchyard-desktop-core
 npm test
-python3 scripts/smoke-claude.py
 ```
 
-The smoke check runs the actual prepared helper with test data, checks model
-selection and the Composite classifier exchange, and verifies test storage and
-shutdown cleanup. It does not contact Claude. Real subscription sign-in, mods,
-model access and a full Claude Code conversation still need testing with an
-actual account. Proposed core follow-ups are in `claude-core-proposals.md`.
+`cargo test -p switchyard-desktop-core -- --include-ignored claude_route` also starts
+the prepared bundled server with a fake key, on an ephemeral port, and checks that
+both routes are served and that the key never reaches a file.
 
 ## Windows development
 

@@ -5,7 +5,7 @@ import { api, type RouteSettings } from "./api";
 
 vi.mock("./api", async (original) => {
   const module = await original<typeof import("./api")>();
-  return { ...module, native: true, api: { bootstrap: vi.fn(), preview: vi.fn(), save: vi.fn(), saveLibrary: vi.fn(), typesafeKeyStatus: vi.fn(), saveTypesafeKey: vi.fn(), start: vi.fn(), stop: vi.fn(), status: vi.fn(), stats: vi.fn(), history: vi.fn(), modelPrices: vi.fn(), discoverModels: vi.fn(), importSetup: vi.fn(), beginLogin: vi.fn(), loginStatus: vi.fn(), cancelLogin: vi.fn(), claudeSettings: vi.fn(), claudeStatus: vi.fn() } };
+  return { ...module, native: true, api: { bootstrap: vi.fn(), preview: vi.fn(), save: vi.fn(), saveLibrary: vi.fn(), typesafeKeyStatus: vi.fn(), saveTypesafeKey: vi.fn(), start: vi.fn(), stop: vi.fn(), status: vi.fn(), stats: vi.fn(), history: vi.fn(), modelPrices: vi.fn(), discoverModels: vi.fn(), importSetup: vi.fn(), beginLogin: vi.fn(), loginStatus: vi.fn(), cancelLogin: vi.fn(), claudeSettings: vi.fn(), saveClaudeSettings: vi.fn(), claudeLaunchCommand: vi.fn(), anthropicKeyStatus: vi.fn(), saveAnthropicKey: vi.fn() } };
 });
 
 const settings: RouteSettings = { algorithm: "stage_router", efficientModel: "test-small", capableModel: "test-large" };
@@ -18,8 +18,8 @@ beforeEach(() => {
   vi.mocked(api.status).mockResolvedValue({ ...stoppedSession, running: true });
   vi.mocked(api.history).mockResolvedValue([]);
   vi.mocked(api.modelPrices).mockResolvedValue({});
-  vi.mocked(api.claudeSettings).mockResolvedValue({ executable: "", efficientModel: "", capableModel: "" });
-  vi.mocked(api.claudeStatus).mockRejectedValue("Claude Code is not installed in this test");
+  vi.mocked(api.claudeSettings).mockResolvedValue({ efficientModel: "", capableModel: "" });
+  vi.mocked(api.anthropicKeyStatus).mockResolvedValue(false);
   vi.mocked(api.stats).mockResolvedValue({ total_requests: 7, total_tokens: { total: 120 }, total_errors: 0 });
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });

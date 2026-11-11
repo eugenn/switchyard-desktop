@@ -51,10 +51,7 @@ export function servingTargets(settings: RouteSettings): ModelTarget[] {
   return targets;
 }
 export interface AvailableModel { id: string; displayName: string; supportsImages: boolean; contextWindow: number | null; efforts: string[] }
-export interface ClaudeSettings { executable: string; efficientModel: string; capableModel: string }
-export interface ClaudeStatus { installed: boolean; version: string; signedIn: boolean; subscriptionAuth: boolean; pending: boolean; supported: boolean; compatibleVersion: boolean; pluginAvailable: boolean; message: string; models: ClaudeModel[] }
-export interface ClaudeModel { id: string; name: string; recommended: boolean }
-export interface PreparedClaudePlugin { directory: string; command: string }
+export interface ClaudeSettings { efficientModel: string; capableModel: string }
 export interface RuntimeStatus {
   available: boolean;
   platform: string;
@@ -95,10 +92,10 @@ export const native = isTauri();
 
 export const api = {
   claudeSettings: () => invoke<ClaudeSettings>("claude_settings"),
-  claudeStatus: (settings: ClaudeSettings) => invoke<ClaudeStatus>("claude_status", { settings }),
-  claudeLogin: (settings: ClaudeSettings) => invoke<ClaudeStatus>("claude_login", { settings }),
-  claudeCancelLogin: () => invoke<ClaudeStatus>("claude_cancel_login"),
-  prepareClaude: (settings: ClaudeSettings) => invoke<PreparedClaudePlugin>("prepare_claude", { settings }),
+  saveClaudeSettings: (settings: ClaudeSettings) => invoke<void>("save_claude_settings", { settings }),
+  claudeLaunchCommand: (settings: ClaudeSettings) => invoke<string>("claude_launch_command", { settings }),
+  anthropicKeyStatus: () => invoke<boolean>("anthropic_key_status"),
+  saveAnthropicKey: (key: string) => invoke<void>("save_anthropic_key", { key }),
   typesafeKeyStatus: () => invoke<boolean>("typesafe_key_status"),
   saveTypesafeKey: (key: string) => invoke<void>("save_typesafe_key", { key }),
   saveLibrary: (roles: RoutingRole[], groups: RoleGroup[]) => invoke<void>("save_role_library", { roles, groups }),

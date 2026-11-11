@@ -27,12 +27,13 @@ decision, and fresh, cached, and output token counts for an individual request.
 | Integration | How it works | What you need |
 | --- | --- | --- |
 | Codex / ChatGPT | Codex sends requests to the local Switchyard server, which selects a model and calls the bundled LiteLLM gateway. | Codex CLI, account access to the chosen models, and a separate ChatGPT sign-in through the app. |
-| Claude Code | A Switchyard add-on selects between two models inside Claude Code. Claude Code handles sign-in and requests directly. | Claude Code 2.1.301+, mods enabled, a subscription sign-in and access to both models. macOS only; live-account testing still needed. |
+| Claude Code | Claude Code sends requests to the local Switchyard server, which selects between two Claude models and calls Anthropic with your API key. | Claude Code, an Anthropic API key (billed to your API account, not a Claude subscription) and access to both models. Development preview; live-key testing still needed. |
 | Jev / TypeSafe | Optional service that helps choose the model; it does not write the final answer. | A TypeSafe API key. Classification requests are separate from your model usage. |
 
-Claude does **not** use the local Codex proxy: this does not provide a general
-Claude API endpoint backed by a subscription. Gemini has no account setup flow
-in this app yet. Supported models and usage limits depend on your provider.
+Claude Code uses the same local server as Codex but its own Claude route, so its
+requests also appear in Activity. There is no Claude subscription sign-in: the app
+never handles Claude Code tokens. Gemini has no account setup flow in this app yet.
+Supported models and usage limits depend on your provider.
 
 ## Run on macOS
 
@@ -78,17 +79,17 @@ The app temporarily creates `CODEX_HOME/switch.config.toml`; it does not rewrite
 a file containing only Codex UI state can be replaced on Start. An occupied port is
 reported rather than freed by stopping someone else's process.
 
-## Use Claude without an API key
+## Use Claude Code with an Anthropic API key
 
 Claude Code is Anthropic's program for working with code in Terminal, separate
-from the Claude website and desktop app. Sign in through Claude Code, choose two
-models in **Routing > Set up Claude**, then prepare and run the launch command
-shown by the app. Preparing the command does not start Claude Code automatically.
+from the Claude website and desktop app. In **Routing > Set up Claude**, save your
+Anthropic API key (it goes to the system credential vault), choose two models,
+start routing, and run the launch command the app shows. The server calls
+Anthropic with your key; Claude Code never sees it. Usage is billed to your
+Anthropic API account.
 
-Follow the [step-by-step Claude guide](desktop/README.md#claude-code-subscription-routing)
-for the one-time add-on build, account connection, model selection and pause commands.
-Your subscription's limits still apply; routing can also make classifier requests.
-Claude activity is not included in the app's HTTP proxy statistics.
+Follow the [step-by-step Claude guide](desktop/README.md#claude-code-routing-with-an-anthropic-api-key)
+for setup, what is not verified yet and the Noop note for Claude-only use.
 
 ## Existing installations
 

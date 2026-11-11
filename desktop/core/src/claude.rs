@@ -1,380 +1,175 @@
-use std::{
-    path::PathBuf,
-    process::Command,
-    time::{Duration, Instant},
-};
+//! Claude Code routing through the app's own Switchyard server, authenticated with
+//! the user's Anthropic API key.
+//!
+//! The key lives only in the system credential vault. The managed server receives
+//! it in `ANTHROPIC_API_KEY` and makes every Anthropic call itself, including the
+//! classifier. Claude Code is pointed at the local server and never sees the key.
+//! No Claude subscription sign-in, plug-in or token is involved.
 
 use serde::{Deserialize, Serialize};
+use toml::{Table, Value};
 
-use crate::{Result, RuntimeLayout, UserDataLocations, process::OwnedProcess};
+use crate::{Result, UserDataLocations};
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+/// The model name Claude Code sends to select this route.
+pub const CLAUDE_ROUTE_ID: &str = "switchyard-claude";
+/// Environment variable the managed server reads the Anthropic key from.
+pub(crate) const CLAUDE_KEY_ENV: &str = "ANTHROPIC_API_KEY";
+
+const SETTINGS_FILE: &str = "claude-settings.json";
+const TEMPLATE: &str = include_str!("../../../vendor/switchyard/examples/claude/switchyard.toml");
+
+/// Saved Claude Code routing setup. Both models empty means the route is off.
+/// Older saved files carried a Claude Code executable path; it is ignored.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
 pub struct ClaudeSettings {
-    pub executable: String,
     pub efficient_model: String,
     pub capable_model: String,
 }
 
-#[derive(Clone, Debug, Default, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ClaudeStatus {
-    pub installed: bool,
-    pub version: String,
-    pub signed_in: bool,
-    pub subscription_auth: bool,
-    pub pending: bool,
-    pub supported: bool,
-    pub compatible_version: bool,
-    pub plugin_available: bool,
-    pub message: String,
-    /// Models offered to the signed-in organization, read from Claude Code's
-    /// own model catalog cache. Contains IDs and display names only.
-    pub models: Vec<ClaudeModel>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ClaudeModel {
-    pub id: String,
-    pub name: String,
-    pub recommended: bool,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PreparedClaudePlugin {
-    pub directory: PathBuf,
-    pub command: String,
-}
-
-pub struct ClaudeIntegration {
-    locations: UserDataLocations,
-    runtime: RuntimeLayout,
-    login: Option<(OwnedProcess, Instant)>,
-}
-
 impl ClaudeSettings {
-    fn validate(&self) -> Result<()> {
-        if self.executable.len() > 4096 || self.executable.chars().any(char::is_control) {
-            return Err("Invalid Claude Code executable path.".into());
+    pub fn load(locations: &UserDataLocations) -> Result<Self> {
+        match std::fs::read(locations.root().join(SETTINGS_FILE)) {
+            Ok(bytes) => serde_json::from_slice(&bytes)
+                .map_err(|_| "Could not read Claude Code routing settings.".into()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
+            Err(_) => Err("Could not read Claude Code routing settings.".into()),
         }
-        if !self.executable.is_empty() && !std::path::Path::new(&self.executable).is_absolute() {
+    }
+
+    pub fn save(&self, locations: &UserDataLocations) -> Result<()> {
+        self.validate()?;
+        locations.write(
+            SETTINGS_FILE,
+            &serde_json::to_string(self).map_err(|error| error.to_string())?,
+        )
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        let models = [&self.efficient_model, &self.capable_model];
+        if models.iter().all(|model| model.is_empty()) {
+            return Ok(());
+        }
+        if models.iter().any(|model| model.is_empty()) {
             return Err(
-                "Use an absolute Claude Code executable path, or leave it empty for PATH.".into(),
+                "Enter both Claude model IDs, or clear both to turn Claude Code routing off."
+                    .into(),
             );
+        }
+        if models.iter().any(|model| !valid_model_id(model)) {
+            return Err("Enter exact Claude model IDs (claude-...) for both tiers. The app does not guess which models your Anthropic account can use.".into());
         }
         Ok(())
     }
 
-    fn configuration(&self) -> Result<String> {
+    /// Whether the managed server should serve the Claude Code route.
+    pub fn enabled(&self) -> bool {
+        !self.efficient_model.is_empty() && !self.capable_model.is_empty()
+    }
+
+    /// Adds the Claude Code route, its Anthropic client and its two targets to the
+    /// generated server document. Does nothing while the route is off. The route
+    /// reuses the shipped Composite policy and classifier prompt; unlike the retired
+    /// native plug-in, the server now makes the classifier call with the API key.
+    pub(crate) fn extend_document(&self, document: &mut Table) -> Result<()> {
         self.validate()?;
-        for model in [&self.efficient_model, &self.capable_model] {
-            if !valid_model_id(model) {
-                return Err("Enter exact native Claude model IDs (claude-...) for both tiers. Availability is checked by Claude Code, not inferred from your subscription.".into());
-            }
+        if !self.enabled() {
+            return Ok(());
         }
-        let mut config: toml::Table =
-            include_str!("../../../vendor/switchyard/examples/claude/switchyard.toml")
-                .parse()
-                .map_err(|_| "Invalid bundled Claude routing template.")?;
-        config["targets"]["efficient"]["id"] = self.efficient_model.clone().into();
-        config["targets"]["capable"]["id"] = self.capable_model.clone().into();
-        toml::to_string_pretty(&config).map_err(|error| error.to_string())
-    }
-}
-
-impl ClaudeIntegration {
-    pub fn new(locations: UserDataLocations, runtime: RuntimeLayout) -> Self {
-        Self {
-            locations,
-            runtime,
-            login: None,
-        }
-    }
-
-    pub fn settings(&self) -> Result<ClaudeSettings> {
-        match std::fs::read(self.locations.root().join("claude-settings.json")) {
-            Ok(bytes) => serde_json::from_slice(&bytes)
-                .map_err(|_| "Could not read Claude integration settings.".into()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                Ok(ClaudeSettings::default())
-            }
-            Err(_) => Err("Could not read Claude integration settings.".into()),
-        }
-    }
-
-    fn command(&self, settings: &ClaudeSettings) -> Result<Command> {
-        settings.validate()?;
-        let mut command = Command::new(if settings.executable.is_empty() {
-            "claude"
-        } else {
-            &settings.executable
-        });
-        command
-            .env("CLAUDE_CONFIG_DIR", self.locations.claude_home())
-            .env("HOME", self.locations.user_home())
-            .env("USERPROFILE", self.locations.user_home())
-            .current_dir(self.locations.root());
-        Ok(command)
-    }
-
-    pub fn begin_login(&mut self, settings: &ClaudeSettings) -> Result<ClaudeStatus> {
-        if self.login.is_some() {
-            return Err("A Claude Code sign-in is already pending.".into());
-        }
-        settings.validate()?;
-        std::fs::create_dir_all(self.locations.root()).map_err(|error| error.to_string())?;
-        self.locations.write(
-            "claude-settings.json",
-            &serde_json::to_string(settings).map_err(|error| error.to_string())?,
-        )?;
-        let mut command = self.command(settings)?;
-        command.args(["auth", "login"]);
-        let process = OwnedProcess::spawn(&mut command)?;
-        self.login = Some((process, Instant::now()));
-        Ok(ClaudeStatus { pending: true, message: "Complete sign-in in the browser opened by Claude Code. Switchyard never reads or stores the subscription token.".into(), ..self.base_status() })
-    }
-
-    fn base_status(&self) -> ClaudeStatus {
-        let directory = self.runtime.root().join("claude-plugin");
-        let snapshot_matches = std::fs::read(self.runtime.root().join("switchyard-source.json"))
-            .is_ok_and(|bytes| bytes == include_bytes!("../../../vendor/switchyard-source.json"));
-        ClaudeStatus {
-            supported: cfg!(target_os = "macos"),
-            plugin_available: cfg!(target_os = "macos")
-                && snapshot_matches
-                && [
-                    "bin/switchyard-claude",
-                    "hooks/register.mjs",
-                    "hooks/hooks.json",
-                    ".claude-plugin/plugin.json",
-                    "LICENSE",
-                    "NOTICE",
-                ]
-                .iter()
-                .all(|path| directory.join(path).is_file()),
-            ..Default::default()
-        }
-    }
-
-    pub fn cancel_login(&mut self) -> ClaudeStatus {
-        self.login.take();
-        ClaudeStatus {
-            message: "Claude Code sign-in cancelled. Existing Claude credentials were not removed."
-                .into(),
-            ..self.base_status()
-        }
-    }
-
-    async fn output(
-        &self,
-        settings: &ClaudeSettings,
-        arguments: &[&str],
-    ) -> Result<(bool, Vec<u8>)> {
-        std::fs::create_dir_all(self.locations.root()).map_err(|error| error.to_string())?;
-        let mut command = self.command(settings)?;
-        command.args(arguments);
-        let (mut process, output) = OwnedProcess::capture_limited(&mut command, 65537)?;
-        let deadline = Instant::now() + Duration::from_secs(15);
-        let success = loop {
-            if let Some(success) = process.exit_success()? {
-                break success;
-            }
-            if Instant::now() >= deadline {
-                return Err("Claude Code did not respond within 15 seconds.".into());
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
+        let bundled = || "Invalid bundled Claude routing template.";
+        let mut template: Table = TEMPLATE.parse().map_err(|_| bundled())?;
+        let mut route = match template
+            .get_mut("routes")
+            .and_then(Value::as_table_mut)
+            .and_then(|routes| routes.remove("claude"))
+        {
+            Some(Value::Table(route)) => route,
+            _ => return Err(bundled().into()),
         };
-        process.finish_output().await?;
-        let bytes = output
-            .lock()
-            .map_err(|_| "Could not read Claude Code status.")?
-            .clone();
-        if bytes.len() > 65536 {
-            return Err("Claude Code status exceeded the output limit.".into());
-        }
-        Ok((success, bytes))
-    }
+        route.insert("id".into(), CLAUDE_ROUTE_ID.into());
+        let classifier = route
+            .get_mut("classifier")
+            .and_then(Value::as_table_mut)
+            .ok_or_else(bundled)?;
+        classifier.insert("target".into(), "claude_efficient".into());
+        let stage = route
+            .get_mut("stage")
+            .and_then(Value::as_table_mut)
+            .ok_or_else(bundled)?;
+        stage.insert("efficient_target".into(), "claude_efficient".into());
+        stage.insert("capable_target".into(), "claude_capable".into());
 
-    pub async fn status(&mut self, settings: &ClaudeSettings) -> Result<ClaudeStatus> {
-        settings.validate()?;
-        let mut status = self.base_status();
-        if let Some((process, started)) = &mut self.login {
-            if started.elapsed() > Duration::from_secs(15 * 60) {
-                self.login.take();
-                return Err(
-                    "Claude Code sign-in timed out. Retry when ready to finish in your browser."
-                        .into(),
-                );
-            }
-            match process.exit_success()? {
-                None => {
-                    return Ok(ClaudeStatus {
-                        pending: true,
-                        message: "Waiting for Claude Code browser sign-in.".into(),
-                        ..status
-                    });
-                }
-                Some(false) => {
-                    self.login.take();
-                    return Err("Claude Code sign-in did not finish. Retry, or run claude auth login in your terminal and check the account again.".into());
-                }
-                Some(true) => {
-                    self.login.take();
-                }
-            }
-        }
-        let (success, bytes) = self.output(settings, &["--version"]).await?;
-        if !success {
-            return Err("Claude Code version check failed.".into());
-        }
-        let version =
-            String::from_utf8(bytes).map_err(|_| "Invalid Claude Code version output.")?;
-        status.version = version.trim().chars().take(120).collect();
-        status.installed = true;
-        let (success, bytes) = self.output(settings, &["auth", "status"]).await?;
-        let auth: serde_json::Value = serde_json::from_slice(&bytes).map_err(
-            |_| "Claude Code returned an unsupported account status. Update Claude Code and retry.",
-        )?;
-        status.signed_in = success && auth["loggedIn"] == true;
-        status.subscription_auth = status.signed_in && auth["authMethod"] == "claude.ai";
-        if status.signed_in {
-            status.models = self.account_models(auth["orgId"].as_str().unwrap_or(""));
-        }
-        status.message = if !status.signed_in {
-            "Claude Code is not signed in. Sign in with your Claude subscription."
-        } else if !status.subscription_auth {
-            "Claude Code is authenticated, but not with a Claude subscription login. Check claude auth status in your terminal; Switchyard does not change authentication overrides."
-        } else {
-            "Claude subscription connected through the original Claude Code CLI. Credentials stay with Claude Code."
-        }.into();
-        // Routing blockers are reported through flags so the UI can show them
-        // separately from the account state.
-        status.compatible_version = compatible_version(&status.version);
-        if !status.compatible_version {
-            status.plugin_available = false;
-        }
-        Ok(status)
-    }
-
-    pub async fn prepare(&mut self, settings: &ClaudeSettings) -> Result<PreparedClaudePlugin> {
-        let config = settings.configuration()?;
-        let status = self.status(settings).await?;
-        if !status.supported || !status.plugin_available {
-            return Err("The native Claude plugin is unavailable. On macOS prepare the bundled runtime with --claude-plugin; use Claude Code 2.1.301+ with mods enabled. Windows is not supported yet.".into());
-        }
-        if status.pending || !status.subscription_auth {
-            return Err("Complete a Claude subscription login in the original Claude Code CLI before preparing routing.".into());
-        }
-        let parent = self.locations.root().join("claude-plugins");
-        std::fs::create_dir_all(&parent).map_err(|error| error.to_string())?;
-        let staged = tempfile::Builder::new()
-            .prefix("switchyard-")
-            .tempdir_in(&parent)
-            .map_err(|error| error.to_string())?;
-        let source = self.runtime.root().join("claude-plugin");
-        for relative in [
-            "bin/switchyard-claude",
-            "hooks/register.mjs",
-            "hooks/hooks.json",
-            ".claude-plugin/plugin.json",
-            "LICENSE",
-            "NOTICE",
+        let mut client = Table::new();
+        client.insert("format".into(), "anthropic_messages".into());
+        client.insert("base_url".into(), "https://api.anthropic.com".into());
+        client.insert("api_key_env".into(), CLAUDE_KEY_ENV.into());
+        let mut targets = Table::new();
+        for (key, model) in [
+            ("claude_efficient", &self.efficient_model),
+            ("claude_capable", &self.capable_model),
         ] {
-            let destination = staged.path().join(relative);
-            std::fs::create_dir_all(destination.parent().unwrap())
-                .map_err(|error| error.to_string())?;
-            std::fs::copy(source.join(relative), destination)
-                .map_err(|error| format!("Could not stage the bundled Claude plugin: {error}"))?;
+            let mut target = Table::new();
+            target.insert("id".into(), model.clone().into());
+            target.insert("llm_client".into(), "claude".into());
+            targets.insert(key.into(), target.into());
         }
-        std::fs::write(staged.path().join("switchyard.toml"), config)
-            .map_err(|error| error.to_string())?;
-        self.locations.write(
-            "claude-settings.json",
-            &serde_json::to_string(settings).map_err(|error| error.to_string())?,
-        )?;
-        let directory = staged.keep();
-        let command = format!(
-            "CLAUDE_CONFIG_DIR={} SWITCHYARD_CONFIG={} {} --plugin-dir {}",
-            shell_quote(self.locations.claude_home().to_string_lossy().as_ref()),
-            shell_quote(directory.join("switchyard.toml").to_string_lossy().as_ref()),
-            shell_quote(if settings.executable.is_empty() {
-                "claude"
-            } else {
-                &settings.executable
-            }),
-            shell_quote(directory.to_string_lossy().as_ref())
-        );
-        Ok(PreparedClaudePlugin { directory, command })
-    }
-}
-
-impl ClaudeIntegration {
-    /// Reads the newest catalog Claude Code cached for this organization under
-    /// `<CLAUDE_CONFIG_DIR>/cache/model-catalog/<orgId>-*.json`. The cache is an
-    /// unversioned Claude Code detail, so any unexpected shape yields no models
-    /// and the user can still type IDs.
-    fn account_models(&self, organization: &str) -> Vec<ClaudeModel> {
-        if organization.is_empty()
-            || organization.len() > 64
-            || !organization
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-        {
-            return Vec::new();
-        }
-        let Ok(entries) =
-            std::fs::read_dir(self.locations.claude_home().join("cache/model-catalog"))
-        else {
-            return Vec::new();
-        };
-        let prefix = format!("{organization}-");
-        let newest = entries
-            .flatten()
-            .filter(|entry| {
-                let name = entry.file_name();
-                let name = name.to_string_lossy();
-                name.starts_with(&prefix) && name.ends_with(".json")
-            })
-            .filter(|entry| {
-                entry
-                    .metadata()
-                    .is_ok_and(|meta| meta.is_file() && meta.len() <= 1 << 20)
-            })
-            .filter_map(|entry| {
-                let catalog: serde_json::Value =
-                    serde_json::from_slice(&std::fs::read(entry.path()).ok()?).ok()?;
-                Some((catalog["fetchedAt"].as_u64().unwrap_or(0), catalog))
-            })
-            .max_by_key(|(fetched, _)| *fetched);
-        let Some((_, catalog)) = newest else {
-            return Vec::new();
-        };
-        let mut models: Vec<ClaudeModel> = Vec::new();
-        for model in catalog["catalog"]["config"]["models"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .take(200)
-        {
-            let Some(id) = model["id"].as_str().filter(|id| valid_model_id(id)) else {
-                continue;
-            };
-            if models.iter().any(|known| known.id == id) {
-                continue;
+        for (section, name, entry) in [
+            ("llm_clients", "claude", Value::Table(client)),
+            ("routes", "claude", Value::Table(route)),
+        ] {
+            let table = document
+                .entry(section)
+                .or_insert_with(|| Value::Table(Table::new()))
+                .as_table_mut()
+                .ok_or("Generated configuration has an unexpected shape.")?;
+            if table.insert(name.into(), entry).is_some() {
+                return Err("Generated configuration already defines a Claude entry.".into());
             }
-            let name = model["name"]
-                .as_str()
-                .filter(|name| name.len() <= 80 && !name.chars().any(char::is_control))
-                .unwrap_or(id);
-            models.push(ClaudeModel {
-                id: id.into(),
-                name: name.into(),
-                recommended: model["section"] == "main",
-            });
         }
-        models
+        let existing = document
+            .entry("targets")
+            .or_insert_with(|| Value::Table(Table::new()))
+            .as_table_mut()
+            .ok_or("Generated configuration has an unexpected shape.")?;
+        for (key, target) in targets {
+            if existing.insert(key, target).is_some() {
+                return Err("Generated configuration already defines a Claude target.".into());
+            }
+        }
+        Ok(())
+    }
+
+    /// The shell command that starts Claude Code against the local server. The
+    /// token is a placeholder that only stops Claude Code from asking to sign in:
+    /// the server ignores it and authenticates upstream with the stored API key.
+    pub fn launch_command(&self, router_port: u16) -> Result<String> {
+        self.validate()?;
+        if !self.enabled() {
+            return Err("Enter both Claude model IDs first.".into());
+        }
+        let variables = [
+            (
+                "ANTHROPIC_BASE_URL",
+                format!("http://127.0.0.1:{router_port}"),
+            ),
+            ("ANTHROPIC_AUTH_TOKEN", "switchyard-local".into()),
+            ("ANTHROPIC_MODEL", CLAUDE_ROUTE_ID.into()),
+            ("ANTHROPIC_DEFAULT_OPUS_MODEL", CLAUDE_ROUTE_ID.into()),
+            ("ANTHROPIC_DEFAULT_SONNET_MODEL", CLAUDE_ROUTE_ID.into()),
+            ("ANTHROPIC_DEFAULT_HAIKU_MODEL", CLAUDE_ROUTE_ID.into()),
+            (
+                "ANTHROPIC_CUSTOM_HEADERS",
+                "x-switchyard-origin: claude-code".into(),
+            ),
+        ];
+        let mut command = variables
+            .iter()
+            .map(|(name, value)| format!("{name}={}", shell_quote(value)))
+            .collect::<Vec<_>>()
+            .join(" ");
+        command.push_str(" claude");
+        Ok(command)
     }
 }
 
@@ -391,315 +186,167 @@ fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
-fn compatible_version(version: &str) -> bool {
-    let parts = version
-        .split_whitespace()
-        .next()
-        .unwrap_or("")
-        .split('.')
-        .map(str::parse::<u32>)
-        .collect::<std::result::Result<Vec<_>, _>>();
-    parts.is_ok_and(|parts| parts.len() == 3 && (parts[0], parts[1], parts[2]) >= (2, 1, 301))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn settings() -> ClaudeSettings {
+        ClaudeSettings {
+            efficient_model: "claude-sonnet-test".into(),
+            capable_model: "claude-opus-test".into(),
+        }
+    }
+
+    fn document() -> Table {
+        r#"
+schema_version = 1
+[llm_clients.openai]
+format = "openai_responses"
+base_url = "http://127.0.0.1:4101/v1"
+[targets.efficient]
+id = "gpt-test"
+llm_client = "openai"
+[routes.main]
+id = "switchyard-desktop"
+type = "auto"
+"#
+        .parse()
+        .unwrap()
+    }
+
     #[test]
     fn validates_exact_model_ids_without_guessing_account_models() {
-        let mut settings = ClaudeSettings {
-            efficient_model: "claude-test-small".into(),
-            capable_model: "claude-test-large".into(),
-            ..Default::default()
-        };
-        let config: toml::Table = settings.configuration().unwrap().parse().unwrap();
-        assert_eq!(
-            config["targets"]["efficient"]["id"].as_str(),
-            Some("claude-test-small")
-        );
-        assert_eq!(
-            config["routes"]["claude"]["id"].as_str(),
-            Some("switchyard")
-        );
-        assert_eq!(
-            config["llm_clients"]["claude"]["format"].as_str(),
-            Some("anthropic_messages")
-        );
-        assert!(!settings.configuration().unwrap().contains("api_key"));
+        assert!(ClaudeSettings::default().validate().is_ok());
+        assert!(!ClaudeSettings::default().enabled());
+        assert!(settings().validate().is_ok());
+        assert!(settings().enabled());
         for invalid in [
             "",
-            "sonnet",
-            "gpt-test",
             "claude-",
-            "claude-\"injection",
-            "claude-bad\n",
+            "sonnet",
+            "gpt-5",
+            "claude-opus 4",
+            "claude-opus;rm",
+            "claude-\u{e9}",
         ] {
-            settings.efficient_model = invalid.into();
-            assert!(settings.configuration().is_err(), "accepted {invalid:?}");
+            let mut candidate = settings();
+            candidate.efficient_model = invalid.into();
+            assert!(candidate.validate().is_err(), "accepted {invalid:?}");
         }
+        let one_sided = ClaudeSettings {
+            efficient_model: "claude-sonnet-test".into(),
+            capable_model: String::new(),
+        };
+        assert!(one_sided.validate().is_err());
+        assert!(!one_sided.enabled());
     }
 
     #[test]
-    fn command_quotes_paths_and_enforces_minimum_version() {
-        assert_eq!(shell_quote("/tmp/it's a path"), "'/tmp/it'\\''s a path'");
-        assert!(!compatible_version("2.1.300 (Claude Code)"));
-        assert!(compatible_version("2.1.301 (Claude Code)"));
-        assert!(compatible_version("3.0.0 (Claude Code)"));
-        assert!(!compatible_version("unrecognized"));
-        assert!(
-            ClaudeSettings {
-                executable: "relative/claude".into(),
-                ..Default::default()
-            }
-            .validate()
-            .is_err()
+    fn route_is_added_beside_the_codex_route_and_never_contains_a_secret() {
+        let mut document = document();
+        settings().extend_document(&mut document).unwrap();
+        let text = toml::to_string_pretty(&document).unwrap();
+        assert!(!text.to_lowercase().contains("sk-ant"));
+        assert_eq!(
+            document["routes"]["main"]["id"].as_str(),
+            Some("switchyard-desktop")
+        );
+        let route = &document["routes"]["claude"];
+        assert_eq!(route["id"].as_str(), Some(CLAUDE_ROUTE_ID));
+        assert_eq!(route["type"].as_str(), Some("composite"));
+        assert_eq!(
+            route["classifier"]["target"].as_str(),
+            Some("claude_efficient")
+        );
+        assert_eq!(
+            route["stage"]["efficient_target"].as_str(),
+            Some("claude_efficient")
+        );
+        assert_eq!(
+            route["stage"]["capable_target"].as_str(),
+            Some("claude_capable")
+        );
+        let client = &document["llm_clients"]["claude"];
+        assert_eq!(client["format"].as_str(), Some("anthropic_messages"));
+        assert_eq!(
+            client["base_url"].as_str(),
+            Some("https://api.anthropic.com")
+        );
+        assert_eq!(client["api_key_env"].as_str(), Some(CLAUDE_KEY_ENV));
+        assert!(client.get("forward_auth").is_none());
+        assert_eq!(
+            document["targets"]["claude_efficient"]["id"].as_str(),
+            Some("claude-sonnet-test")
+        );
+        assert_eq!(
+            document["targets"]["claude_capable"]["id"].as_str(),
+            Some("claude-opus-test")
+        );
+        assert_eq!(
+            document["targets"]["claude_efficient"]["llm_client"].as_str(),
+            Some("claude")
+        );
+        // The Codex route's own entries are untouched.
+        assert_eq!(
+            document["targets"]["efficient"]["id"].as_str(),
+            Some("gpt-test")
+        );
+        assert_eq!(
+            document["llm_clients"]["openai"]["format"].as_str(),
+            Some("openai_responses")
         );
     }
 
-    #[cfg(unix)]
-    fn fixture() -> (tempfile::TempDir, ClaudeIntegration, ClaudeSettings) {
-        use std::os::unix::fs::PermissionsExt;
+    #[test]
+    fn a_disabled_route_leaves_the_document_unchanged() {
+        let mut document = document();
+        let before = document.clone();
+        ClaudeSettings::default()
+            .extend_document(&mut document)
+            .unwrap();
+        assert_eq!(document, before);
+    }
+
+    #[test]
+    fn extending_never_overwrites_an_existing_entry() {
+        let mut document = document();
+        settings().extend_document(&mut document).unwrap();
+        assert!(settings().extend_document(&mut document).is_err());
+    }
+
+    #[test]
+    fn launch_command_targets_the_local_server_and_carries_no_secret() {
+        let command = settings().launch_command(4100).unwrap();
+        assert!(command.contains("ANTHROPIC_BASE_URL='http://127.0.0.1:4100'"));
+        assert!(command.contains("ANTHROPIC_MODEL='switchyard-claude'"));
+        assert!(command.contains("ANTHROPIC_DEFAULT_HAIKU_MODEL='switchyard-claude'"));
+        assert!(command.contains("x-switchyard-origin: claude-code"));
+        assert!(command.ends_with(" claude"));
+        assert!(!command.contains("ANTHROPIC_API_KEY"));
+        assert!(ClaudeSettings::default().launch_command(4100).is_err());
+    }
+
+    #[test]
+    fn settings_round_trip_through_injected_locations_and_ignore_legacy_fields() {
         let temporary = tempfile::tempdir().unwrap();
-        let root = temporary.path().join("app");
-        std::fs::create_dir_all(&root).unwrap();
-        let executable = temporary.path().join("claude mock's cli");
-        std::fs::write(&executable, r##"#!/bin/sh
-set -eu
-printf '%s\n' "$HOME" "$USERPROFILE" "$CLAUDE_CONFIG_DIR" >> command-paths
-if [ "$1" = "--version" ]; then echo '2.1.301 (Claude Code)'; exit 0; fi
-if [ "$2" = "login" ]; then
-  if [ -f wait-login ]; then exec /bin/sleep 60; fi
-  printf '{"loggedIn":true,"authMethod":"claude.ai","orgId":"org-1","accessToken":"mock-never-return-this"}' > status.json
-  exit 0
-fi
-if [ -f status.json ]; then cat status.json; else echo '{"loggedIn":false,"authMethod":"none"}'; exit 1; fi
-"##).unwrap();
-        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
-        let runtime = RuntimeLayout::bundled(temporary.path().join("runtime"));
-        let integration = ClaudeIntegration::new(UserDataLocations::injected(root), runtime);
-        let settings = ClaudeSettings {
-            executable: executable.to_string_lossy().into(),
-            efficient_model: "claude-test-small".into(),
-            capable_model: "claude-test-large".into(),
-        };
-        (temporary, integration, settings)
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn cli_owns_login_and_only_sanitized_status_reaches_the_ui() {
-        let (_temporary, mut integration, settings) = fixture();
-        assert!(!integration.status(&settings).await.unwrap().signed_in);
-        assert!(integration.begin_login(&settings).unwrap().pending);
-        assert!(integration.begin_login(&settings).is_err());
-        let status = loop {
-            let status = integration.status(&settings).await.unwrap();
-            if !status.pending {
-                break status;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        };
-        assert!(status.signed_in && status.subscription_auth && status.compatible_version);
-        assert!(
-            !serde_json::to_string(&status)
-                .unwrap()
-                .contains("mock-never-return-this")
-        );
-        let saved =
-            std::fs::read_to_string(integration.locations.root().join("claude-settings.json"))
-                .unwrap();
-        assert!(!saved.contains("accessToken"));
-        let paths =
-            std::fs::read_to_string(integration.locations.root().join("command-paths")).unwrap();
-        assert!(
-            paths
-                .lines()
-                .all(|path| PathBuf::from(path).starts_with(integration.locations.root()))
-        );
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn lists_only_the_signed_in_organizations_cached_models() {
-        let (_temporary, mut integration, settings) = fixture();
-        let catalogs = integration
-            .locations
-            .claude_home()
-            .join("cache/model-catalog");
-        std::fs::create_dir_all(&catalogs).unwrap();
-        let catalog = |fetched: u64, models: &str| {
-            format!(
-                r#"{{"version":2,"fetchedAt":{fetched},"catalog":{{"config":{{"models":[{models}]}}}}}}"#
-            )
-        };
-        std::fs::write(
-            catalogs.join("org-1-old-ccd.json"),
-            catalog(
-                1,
-                r#"{"id":"claude-stale","name":"Stale","section":"main"}"#,
-            ),
-        )
-        .unwrap();
-        std::fs::write(
-            catalogs.join("org-1-new-ccd.json"),
-            catalog(
-                2,
-                r#"{"id":"claude-test-large","name":"Large","section":"main"},{"id":"claude-test-small","name":"Small","section":"overflow"},{"id":"claude-test-large","name":"Duplicate"},{"id":"gpt-other","name":"Other"},{"id":"claude-bad\n","name":"Bad"}"#,
-            ),
-        )
-        .unwrap();
-        std::fs::write(
-            catalogs.join("org-2-x-ccd.json"),
-            catalog(
-                3,
-                r#"{"id":"claude-other-org","name":"Other org","section":"main"}"#,
-            ),
-        )
-        .unwrap();
-        let path = integration.locations.root().join("status.json");
-        std::fs::write(
-            &path,
-            r#"{"loggedIn":true,"authMethod":"claude.ai","orgId":"org-1"}"#,
-        )
-        .unwrap();
-        let status = integration.status(&settings).await.unwrap();
+        let locations = UserDataLocations::injected(temporary.path().to_path_buf());
         assert_eq!(
-            status.models,
-            vec![
-                ClaudeModel {
-                    id: "claude-test-large".into(),
-                    name: "Large".into(),
-                    recommended: true
-                },
-                ClaudeModel {
-                    id: "claude-test-small".into(),
-                    name: "Small".into(),
-                    recommended: false
-                },
-            ]
+            ClaudeSettings::load(&locations).unwrap(),
+            ClaudeSettings::default()
         );
+        settings().save(&locations).unwrap();
+        assert_eq!(ClaudeSettings::load(&locations).unwrap(), settings());
         std::fs::write(
-            &path,
-            r#"{"loggedIn":true,"authMethod":"claude.ai","orgId":"../org-1"}"#,
+            temporary.path().join(SETTINGS_FILE),
+            r#"{"executable":"/opt/claude","efficientModel":"claude-a","capableModel":"claude-b"}"#,
         )
         .unwrap();
-        assert!(
-            integration
-                .status(&settings)
-                .await
-                .unwrap()
-                .models
-                .is_empty()
-        );
-        std::fs::write(
-            &path,
-            r#"{"loggedIn":false,"authMethod":"none","orgId":"org-1"}"#,
-        )
-        .unwrap();
-        assert!(
-            integration
-                .status(&settings)
-                .await
-                .unwrap()
-                .models
-                .is_empty()
-        );
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn api_key_auth_and_bad_status_are_not_subscription_connections() {
-        let (_temporary, mut integration, settings) = fixture();
-        let path = integration.locations.root().join("status.json");
-        std::fs::write(&path, r#"{"loggedIn":true,"authMethod":"api_key"}"#).unwrap();
-        let status = integration.status(&settings).await.unwrap();
-        assert!(status.signed_in);
-        assert!(!status.subscription_auth);
-        assert!(integration.prepare(&settings).await.is_err());
-        std::fs::write(path, "not-json").unwrap();
-        assert!(integration.status(&settings).await.is_err());
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn login_timeout_stops_the_owned_process_without_returning_credentials() {
-        let (_temporary, mut integration, settings) = fixture();
-        std::fs::write(integration.locations.root().join("wait-login"), "").unwrap();
-        integration.begin_login(&settings).unwrap();
-        integration.login.as_mut().unwrap().1 = Instant::now() - Duration::from_secs(901);
-        assert!(
-            integration
-                .status(&settings)
-                .await
-                .unwrap_err()
-                .contains("timed out")
-        );
-        assert!(integration.login.is_none());
-        assert!(!integration.locations.claude_home().exists());
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn cancelling_login_preserves_existing_credentials() {
-        let (_temporary, mut integration, settings) = fixture();
-        let status = integration.locations.root().join("status.json");
-        std::fs::write(&status, r#"{"loggedIn":true,"authMethod":"claude.ai"}"#).unwrap();
-        std::fs::write(integration.locations.root().join("wait-login"), "").unwrap();
-        integration.begin_login(&settings).unwrap();
-        integration.cancel_login();
-        assert!(integration.login.is_none());
-        assert!(
-            integration
-                .status(&settings)
-                .await
-                .unwrap()
-                .subscription_auth
-        );
-        assert!(status.exists());
-    }
-
-    #[cfg(target_os = "macos")]
-    #[tokio::test]
-    async fn prepares_separate_plugins_only_from_the_matching_runtime() {
-        let (_temporary, mut integration, settings) = fixture();
-        std::fs::write(
-            integration.locations.root().join("status.json"),
-            r#"{"loggedIn":true,"authMethod":"claude.ai"}"#,
-        )
-        .unwrap();
-        assert!(integration.prepare(&settings).await.is_err());
-        let runtime = integration.runtime.root().clone();
-        std::fs::create_dir_all(&runtime).unwrap();
-        std::fs::write(
-            runtime.join("switchyard-source.json"),
-            include_bytes!("../../../vendor/switchyard-source.json"),
-        )
-        .unwrap();
-        for relative in [
-            "bin/switchyard-claude",
-            "hooks/register.mjs",
-            "hooks/hooks.json",
-            ".claude-plugin/plugin.json",
-            "LICENSE",
-            "NOTICE",
-        ] {
-            let path = runtime.join("claude-plugin").join(relative);
-            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            std::fs::write(path, "bundled-fixture").unwrap();
-        }
-        let first = integration.prepare(&settings).await.unwrap();
-        let second = integration.prepare(&settings).await.unwrap();
-        assert_ne!(first.directory, second.directory);
-        assert_eq!(
-            std::fs::read_to_string(first.directory.join("hooks/register.mjs")).unwrap(),
-            "bundled-fixture"
-        );
-        assert!(first.command.contains("--plugin-dir"));
-        assert!(first.command.contains("'\\''"));
-        assert!(!first.command.contains("api.anthropic.com"));
-        assert!(!integration.locations.claude_home().exists());
-        std::fs::write(runtime.join("switchyard-source.json"), "wrong-snapshot").unwrap();
-        assert!(integration.prepare(&settings).await.is_err());
+        let legacy = ClaudeSettings::load(&locations).unwrap();
+        assert_eq!(legacy.efficient_model, "claude-a");
+        let invalid = ClaudeSettings {
+            efficient_model: "nope".into(),
+            capable_model: "claude-b".into(),
+        };
+        assert!(invalid.save(&locations).is_err());
     }
 }

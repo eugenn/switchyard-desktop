@@ -13,7 +13,7 @@ mod runtime;
 mod session;
 
 pub use auth::LoginStatus;
-pub use claude::{ClaudeIntegration, ClaudeSettings, ClaudeStatus, PreparedClaudePlugin};
+pub use claude::{CLAUDE_ROUTE_ID, ClaudeSettings};
 pub use config::{
     Algorithm, ConfigurationPreview, JevConfiguration, ModelTarget, RoleGroup, RouteSettings,
     RoutingRole, built_in_roles,

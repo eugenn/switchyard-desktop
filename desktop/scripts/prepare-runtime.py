@@ -34,54 +34,10 @@ def windows_requirements(source):
     return "".join(result)
 
 
-def prepare_claude_plugin():
-    if sys.platform != "darwin":
-        raise SystemExit("The native Claude plugin helper is currently packaged only for macOS.")
-    run([sys.executable, ROOT / "scripts/update-switchyard.py", "--verify"])
-    snapshot = ROOT / "vendor/switchyard-source.json"
-    if not (DESTINATION / "switchyard-source.json").is_file() or (DESTINATION / "switchyard-source.json").read_bytes() != snapshot.read_bytes():
-        raise SystemExit("Prepare a matching bundled runtime before adding the Claude plugin.")
-    destination = DESTINATION / "claude-plugin"
-    if destination.exists():
-        raise SystemExit(f"Claude plugin already exists at {destination}; move it aside before rebuilding.")
-    target = subprocess.check_output(["rustc", "-vV"], text=True)
-    target = next(line.split(": ", 1)[1] for line in target.splitlines() if line.startswith("host: "))
-    target_name = target.replace("-", "_")
-    target_dir = BUILD / "switchyard-target"
-    environment = dict(os.environ, CARGO_TARGET_DIR=str(target_dir))
-    environment[f"CARGO_TARGET_{target_name.upper()}_RUSTFLAGS"] = "-C link-arg=-mmacosx-version-min=14.0"
-    environment[f"CFLAGS_{target_name}"] = "-mmacosx-version-min=14.0"
-    environment[f"CXXFLAGS_{target_name}"] = "-mmacosx-version-min=14.0"
-    run(["cargo", "build", "--locked", "--release", "--target", target, "-p", "switchyard-claude"], cwd=ROOT / "vendor/switchyard", env=environment)
-    source = ROOT / "vendor/switchyard/examples/claude"
-    with tempfile.TemporaryDirectory(prefix="claude-plugin-", dir=DESTINATION) as temporary:
-        staged = Path(temporary) / "plugin"
-        for relative in [".claude-plugin/plugin.json", "hooks/hooks.json", "hooks/register.mjs"]:
-            target_file = staged / relative
-            target_file.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source / relative, target_file)
-        (staged / "bin").mkdir()
-        helper = staged / "bin/switchyard-claude"
-        shutil.copy2(target_dir / target / "release/switchyard-claude", helper)
-        run(["codesign", "--sign", "-", "--force", helper])
-        for name in ["LICENSE", "NOTICE"]:
-            shutil.copy2(ROOT / "vendor/switchyard" / name, staged / name)
-        if destination.exists():
-            raise SystemExit(f"Claude plugin appeared at {destination}; it was not overwritten.")
-        staged.rename(destination)
-    print(f"Claude Code plugin staged at {destination}")
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reuse-python", action="store_true", help="macOS development only: copy the existing repo-local prepared Python runtime")
-    parser.add_argument("--claude-plugin", action="store_true", help="Add the snapshot's native Claude Code plugin to an existing macOS runtime")
     args = parser.parse_args()
-    if args.claude_plugin:
-        if args.reuse_python:
-            parser.error("--claude-plugin cannot be combined with --reuse-python")
-        prepare_claude_plugin()
-        return
     if sys.platform not in ("darwin", "win32"):
         parser.error("Build this runtime on macOS or Windows, not by cross-compiling.")
     DESTINATION.parent.mkdir(parents=True, exist_ok=True)

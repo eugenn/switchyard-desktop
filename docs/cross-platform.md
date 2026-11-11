@@ -19,7 +19,7 @@ explicitly disabled until release acceptance is complete.
 | Saved setups | Explicit draft import/export, legacy JSON compatibility | No automatic account/history migration; missing legacy group names use placeholders. |
 | Codex profile | Temporary switch.config.toml on Start, unchanged-profile removal on Stop, rollback | Forced-quit reconciliation and startup cancellation. |
 | Runtime | Bundled snapshot/Python, sign-in, readiness and owned children | Native Windows runtime and clean-machine acceptance. |
-| Claude Code | Native add-on, subscription sign-in, separate two-model Composite routing | macOS only; real login, mods and request acceptance pending. |
+| Claude Code | Anthropic API key in the system vault, a Claude route on the local server, copyable launch command | Windows launch command; real-key conversation (tools, streaming, thinking) pending. |
 | Activity | Live counters and bounded searchable request records | Full charts, cost/context/session and flow aggregation. |
 | Host integration | Tauri window and normal-exit cleanup | Tray/menu/preferences, guarded exit and single-instance/crash recovery. |
 | Distribution | Tauri is the only packaging path; installer generation disabled | Licensing, signing, updates and native installer acceptance. |
