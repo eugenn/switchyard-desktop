@@ -5,7 +5,7 @@ import { api } from "./api";
 
 vi.mock("./api", async (original) => {
   const module = await original<typeof import("./api")>();
-  return { ...module, native: true, api: { ...module.api, history: vi.fn(), modelPrices: vi.fn(), rolloutSessionIDs: vi.fn() } };
+  return { ...module, native: true, api: { ...module.api, history: vi.fn(), modelPrices: vi.fn(), rolloutSessionIDs: vi.fn(), claudeSettings: vi.fn() } };
 });
 
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
@@ -60,5 +60,22 @@ describe("activity parity", () => {
     render(<Activity settings={{ algorithm: "passthrough", efficientModel: "m", capableModel: "" }} stats={null} statsError="" running={false} onOpenRequests={() => {}} onConfigure={() => {}} />);
     expect(await screen.findByText("$0.01")).toBeTruthy();
     await waitFor(() => expect(screen.getByRole("combobox", { name: "Session" })).toHaveProperty("value", "real"));
+  });
+
+  it("shows a Claude Code session on its own route instead of the Codex profile", async () => {
+    vi.mocked(api.claudeSettings).mockResolvedValue({ efficientModel: "claude-sonnet-5-5", capableModel: "claude-opus-5-5" });
+    vi.mocked(api.modelPrices).mockResolvedValue({});
+    vi.mocked(api.history).mockResolvedValue([
+      { route_id: "switchyard-claude", origin: "claude-code", session_id: "claude-session", model: "claude-sonnet-5-5", target: "claude_efficient", tier: "", ts: 200, prompt_tokens: 1000 },
+      { route_id: "switchyard-claude", origin: "claude-code", session_id: "claude-session", model: "claude-sonnet-5-5", target: "claude_efficient", tier: "classifier", ts: 199, prompt_tokens: 100 },
+    ]);
+    const settings = { algorithm: "stage_router" as const, efficientModel: "gpt-codex-small", capableModel: "gpt-codex-big" };
+    render(<Activity settings={settings} stats={null} statsError="" running={false} onOpenRequests={() => {}} onConfigure={() => {}} />);
+    const map = await screen.findByRole("region", { name: "Where requests go" });
+    expect(await within(map).findByText("claude-code")).toBeTruthy();
+    expect(within(map).getByText("Capable")).toBeTruthy();
+    expect(within(map).getByText("Efficient")).toBeTruthy();
+    expect(within(map).queryByText(/gpt-codex/)).toBeNull();
+    expect(within(map).queryByText("codex")).toBeNull();
   });
 });

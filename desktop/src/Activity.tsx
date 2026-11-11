@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { api, native, type RouteSettings } from "./api";
+import { api, native, type ClaudeSettings, type RouteSettings } from "./api";
 import {
-  activeSessionIDs, compact, dollars, droppingHousekeepingThreads, estimateCost, compactShort, computeMetrics, contextUsage, durationText, group, judgeColor, lanes as orderLanes, milliseconds, modelIDs as stableModelIDs,
+  activeSessionIDs, claudeProfile, compact, dollars, droppingHousekeepingThreads, estimateCost, compactShort, computeMetrics, contextUsage, durationText, group, isClaudeRecord, judgeColor, lanes as orderLanes, milliseconds, modelIDs as stableModelIDs,
   parseRecords, parseStats, percent, profile as routingProfile, rate, roleFor, seconds, sessionSpan, sessions as deriveSessions, shortTime, standardTime, ticks as deriveTicks, tint,
   type ContextUsage, type CostEstimate, type FlowRole, type PriceTable, type LogRecord, type Metrics, type Session, type ServerStats, type Share, type Tick,
 } from "./activityModel";
@@ -18,6 +18,14 @@ export function Activity({ settings, stats: rawStats, statsError, running, onOpe
   const [selectedSessionID, setSelectedSessionID] = useState<string | null>(null);
   const [prices, setPrices] = useState<PriceTable | null>(null);
   const [pricesError, setPricesError] = useState("");
+  const [claude, setClaude] = useState<ClaudeSettings | null>(null);
+
+  useEffect(() => {
+    if (!native) return;
+    let active = true;
+    void Promise.resolve().then(() => api.claudeSettings()).then((stored) => { if (active && stored) setClaude(stored); }).catch(() => undefined);
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     if (!native) return;
@@ -63,26 +71,28 @@ export function Activity({ settings, stats: rawStats, statsError, running, onOpe
   const now = lastRefresh ?? Date.now();
   const records = useMemo(() => parseRecords(rows), [rows]);
   const stats = useMemo(() => rawStats ? parseStats(rawStats) : null, [rawStats]);
-  const profile = useMemo(() => routingProfile(settings), [settings]);
   const sessions = useMemo(() => deriveSessions(records), [records]);
   const active = useMemo(() => activeSessionIDs(records, now), [records, now]);
   const flowSession = sessions.find((session) => session.id === selectedSessionID) ?? sessions[0] ?? null;
   const scoped = flowSession ? records.filter((record) => record.sessionID === flowSession.id) : records;
+  // A Claude Code session runs on the Claude route, with its own targets and classifier; everything else is the Codex profile.
+  const isClaude = flowSession != null && scoped.some(isClaudeRecord);
+  const profile = useMemo(() => isClaude ? claudeProfile(claude) : routingProfile(settings), [isClaude, claude, settings]);
   const metrics = computeMetrics(scoped, now, sessionSpan(flowSession), profile.assignments);
-  const modelIDs = stableModelIDs(profile, records, now);
+  const modelIDs = stableModelIDs(profile, flowSession ? records.filter((record) => isClaudeRecord(record) === isClaude) : records, now);
   // Judge calls count toward spend; without a session, the last 15 minutes (timestamp-less rows included).
   const costRecords = flowSession ? scoped : records.filter((record) => record.ts == null || record.ts >= now - 15 * 60_000);
   const judgeModel = settings.judgeModel?.trim();
   const aliases: Record<string, string> = judgeModel ? { [`judge-${judgeModel}`]: judgeModel } : {};
   const cost = prices ? estimateCost(costRecords, prices, aliases) : null;
-  const emptyReason = records.length ? null : !running ? "Routing is off. Start routing, then send a Codex request." : "No routed turns yet. The log fills as Codex sends requests through the proxy.";
+  const emptyReason = records.length ? null : !running ? "Routing is off. Start routing, then send a Codex or Claude Code request." : "No routed turns yet. The log fills as Codex or Claude Code sends requests through the proxy.";
 
   return <div className="activity" key="activity">
     {(statsError || historyError) && <div className="banner error" role="alert">{statsError ? `Statistics unavailable: ${statsError}` : `Routing log unavailable: ${historyError}`}</div>}
     <Summary metrics={metrics} stats={stats} session={flowSession} lastRefresh={lastRefresh} cost={cost} pricesError={pricesError} />
-    <SignalBox metrics={metrics} modelIDs={modelIDs} isRouting={running} asOf={lastRefresh} usesClassifier={profile.usesClassifier} classifierModelID={profile.classifierModelID}
+    <SignalBox metrics={metrics} modelIDs={modelIDs} isRouting={running} asOf={lastRefresh} usesClassifier={profile.usesClassifier} classifierModelID={profile.classifierModelID} client={isClaude ? "claude-code" : "codex"}
       roles={profile.roles} ticks={deriveTicks(records, flowSession?.id ?? null, metrics.windowStart, metrics.windowEnd)}
-      context={flowSession ? contextUsage(records, flowSession.id, settings, prices) : null} session={flowSession} sessions={sessions} active={active}
+      context={flowSession ? contextUsage(records, flowSession.id, isClaude ? {} : settings, prices) : null} session={flowSession} sessions={sessions} active={active}
       selectedModelID={selectedModelID} onSelectModel={setSelectedModelID} onSelectSession={setSelectedSessionID} onConfigure={onConfigure} />
     <div className="activity-pair">
       <LatencyCard stats={stats} modelIDs={modelIDs} selectedModelID={selectedModelID} onShowAll={() => setSelectedModelID(null)} />
@@ -135,7 +145,7 @@ function CostStat({ cost, session, pricesError }: { cost: CostEstimate | null; s
 // ---------- where requests go ----------
 
 type SignalProps = {
-  metrics: Metrics; modelIDs: string[]; isRouting: boolean; asOf: number | null; usesClassifier: boolean; classifierModelID: string | null; roles: Map<string, FlowRole>;
+  metrics: Metrics; modelIDs: string[]; isRouting: boolean; asOf: number | null; client: string; usesClassifier: boolean; classifierModelID: string | null; roles: Map<string, FlowRole>;
   ticks: Map<string, Tick[]>; context: Map<string, ContextUsage> | null; session: Session | null; sessions: Session[]; active: Set<string>;
   selectedModelID: string | null; onSelectModel: (id: string | null) => void; onSelectSession: (id: string) => void; onConfigure: () => void;
 };
@@ -179,7 +189,7 @@ function SignalBox(props: SignalProps) {
       {!session && <button className="button secondary" onClick={props.onConfigure}>Open routing config</button>}</div> : <>
       <div className="signal-map" style={{ height: body }}>
         <div className="signal-source" style={{ width: SOURCE }}>
-          {showsClassifier && <><div className="client-label" style={{ top: center - NODE / 2 - 44 }}><code>codex</code><span>local client</span></div>
+          {showsClassifier && <><div className="client-label" style={{ top: center - NODE / 2 - 44 }}><code>{props.client}</code><span>local client</span></div>
             <i className="client-connector" style={{ top: center - NODE / 2 - 19 }} /></>}
           <div className={`source-node${latest?.isClassifier && isLive ? " judging" : ""}`} style={{ top: center - NODE / 2 }}>
             <strong><span aria-hidden="true">{showsClassifier ? "✦" : "⑂"}</span>{showsClassifier ? "Classifier" : "Switchyard"}</strong>
@@ -253,7 +263,7 @@ function ContextMeter({ usage, idle }: { usage: ContextUsage | null; idle: boole
 }
 
 function SessionPicker({ sessions, session, active, onSelect }: { sessions: Session[]; session: Session | null; active: Set<string>; onSelect: (id: string) => void }) {
-  if (!sessions.length || !session) return <span className="session-waiting" title="The first Codex conversation routed through this run is picked here."><i aria-hidden="true" />Waiting for a session</span>;
+  if (!sessions.length || !session) return <span className="session-waiting" title="The first Codex or Claude Code conversation routed through this run is picked here."><i aria-hidden="true" />Waiting for a session</span>;
   const live = sessions.filter((item) => active.has(item.id)).length;
   return <label className="session-picker" title={`Show only the turns one client conversation routed.${live ? ` ${live} active in the last 15 minutes, marked with a green dot.` : ""}`}>
     {active.has(session.id) ? <i className="session-live" aria-hidden="true" /> : <span aria-hidden="true" className="session-icon">◌</span>}
