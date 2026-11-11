@@ -1,26 +1,41 @@
-# switchyard-desktop
+<div align="center">
 
-A desktop app that chooses which AI model handles a request. Use a lighter model
-for routine work and a more capable model when needed, without switching by hand.
+<img src="desktop/src-tauri/icons/icon.png" alt="Switchyard Desktop app icon" width="128" height="128">
+
+# Switchyard Desktop
+
+**Route every AI request to the right model, automatically.**<br>
+Lighter models for routine work, more capable ones when it matters, with no manual switching.
+
+[![Status: development preview](https://img.shields.io/badge/status-development%20preview-orange)](#run-on-macos)
+[![Platforms: macOS | Windows](https://img.shields.io/badge/platforms-macOS%20%7C%20Windows-lightgrey)](#run-on-macos)
+[![Built with Tauri, React and Rust](https://img.shields.io/badge/built%20with-Tauri%20%C2%B7%20React%20%C2%B7%20Rust-24c8db)](desktop/README.md)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+
+[Run it](#run-on-macos) · [Codex](#start-routing-codex) · [Claude Code](#use-claude-code-with-an-anthropic-api-key) · [Migrate](#existing-installations) · [Status](#development-and-limitations)
+
+</div>
+
+<br>
+
 The app uses [NVIDIA Switchyard](https://github.com/NVIDIA-NeMo/Switchyard) through
 an independently maintained [core fork](https://github.com/eugenn/Switchyard).
-It is not affiliated with NVIDIA, OpenAI or Anthropic.
+It is not affiliated with NVIDIA, OpenAI or Anthropic. The only application lives in
+[`desktop/`](desktop/README.md), built with Tauri, React and Rust; its source,
+runtime inputs, resources and build tools are all there.
 
-The only application is now in [`desktop/`](desktop/README.md), built with Tauri,
-React and Rust. Its source, runtime inputs, resources and build tools all live there.
-**This is a development preview, not a release-ready installer.** Old DMGs from
-GitHub Releases contain the retired application, not the current code. Build and
-run from source using the instructions below.
+## See where your requests go
 
-![Switchyard Desktop Activity dashboard](images/activity.png)
-
-**Activity** shows how requests in the selected session were distributed across
-routing roles and models, along with latency, cache hits, and estimated API cost.
-
-![Switchyard Desktop Requests history and selected request details](images/requests.png)
-
-**Requests** lets you filter the routing log and inspect the model, classifier
-decision, and fresh, cached, and output token counts for an individual request.
+<table>
+  <tr>
+    <td width="50%"><img src="images/activity.png" alt="Switchyard Desktop Activity dashboard"></td>
+    <td width="50%"><img src="images/requests.png" alt="Switchyard Desktop Requests history and selected request details"></td>
+  </tr>
+  <tr>
+    <td valign="top"><b>Activity</b><br>How requests in the selected session were distributed across routing roles and models, with latency, cache hits and estimated API cost.</td>
+    <td valign="top"><b>Requests</b><br>Filter the routing log and inspect the model, classifier decision, and fresh, cached and output token counts for each request.</td>
+  </tr>
+</table>
 
 ## What you can connect
 
