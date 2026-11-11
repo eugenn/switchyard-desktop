@@ -20,3 +20,4 @@ windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Syste
 
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = "3.7.0"
+core-foundation = "0.10.1"

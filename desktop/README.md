@@ -51,6 +51,12 @@ with your key, including the classifier calls that make the choice.
   generated TOML or the launch command. Only the managed server receives it, in its
   environment. Claude Code never sees it; it sends a placeholder token that the
   server ignores.
+- On macOS all API keys share one Keychain item. Key status checks read only its
+  metadata, and keys are read once per launch, when the server first needs them, so
+  macOS asks for approval at most once per launch. It does not ask at all when the
+  running build saved the keys or was approved with **Always Allow**. A different code
+  signature (every unsigned or ad-hoc rebuild) counts as a new app and is asked once.
+  Windows Credential Manager never asks.
 - Requests appear in **Activity** and **Requests** with origin `claude-code`.
 - Routing uses the bundled Composite policy. The Codex strategy editor does not
   change it.
