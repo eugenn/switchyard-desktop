@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { algorithms, builtInRoles, servingTargets, validationMessage, type Algorithm, type ModelTarget, type RouteSettings, type RoutingRole } from "./api";
 import { families, guides, variableJob } from "./routingGuide";
+import { ModelPicker } from "./ModelPicker";
 import { TypeSafeKey } from "./TypeSafeKey";
 
 type Props = { settings: RouteSettings; change: (next: Partial<RouteSettings>) => void; disabled: boolean };
@@ -178,7 +179,7 @@ function DecisionCard({ settings, change, roles, targets, allTargets, disabled, 
           <select aria-label={`${judge.title} source`} value={settings.judgeTarget ?? ""} onChange={(event) => change({ judgeTarget: event.target.value || null, judgeOptions: "" })}>
             <option value="">Separate model</option>{allTargets.map((target) => <option key={target.key} value={target.key}>Same model as {pretty(target.key)}</option>)}
           </select>
-          {!shared && <input aria-label={`${judge.title} model`} aria-invalid={judgeMissing} autoComplete="off" spellCheck={false} list="account-models" placeholder="Judge model ID" value={settings.judgeModel ?? ""} onChange={(event) => change({ judgeModel: event.target.value })} />}
+          {!shared && <ModelPicker provider="openai" label={`${judge.title} model`} invalid={judgeMissing} placeholder="Judge model ID" value={settings.judgeModel ?? ""} onChange={(judgeModel) => change({ judgeModel })} />}
         </div>
         {shared ? <small className="field-hint">Uses the prompt, effort and options of {pretty(settings.judgeTarget!)}.</small>
           : judgeMissing && settings.judgeModel ? <small className="field-issue">Use the exact model ID: letters, digits and . _ : / - only.</small>
@@ -223,8 +224,8 @@ function SlotCard({ target, roles, title, job, tone, editableKey, roleNeed, role
     </header>
     {job && <p className="slot-job">{job}</p>}
     <div className="slot-fields">
-      <label className="slot-field"><span className="field-label">Model ID</span>
-        <input aria-label={`${title} model`} aria-invalid={invalid} autoComplete="off" spellCheck={false} list="account-models" placeholder="Model ID" value={target.model} onChange={(event) => onChange({ model: event.target.value })} /></label>
+      <div className="slot-field"><span className="field-label">Model ID</span>
+        <ModelPicker provider="openai" label={`${title} model`} invalid={invalid} placeholder="Model ID" value={target.model} onChange={(model) => onChange({ model })} /></div>
       <label className="slot-field"><span className="field-label" title={roleNeed}>Role <small>{roleNeed.split(":")[0]}</small></span>
         <select aria-label={`${title} role`} aria-invalid={roleMissing} value={target.roleId ?? ""} onChange={(event) => onChange({ roleId: event.target.value || null })}><option value="">No role</option>
           {roles.filter((item) => item.kind === "target").map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}

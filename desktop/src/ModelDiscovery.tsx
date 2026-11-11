@@ -1,13 +1,17 @@
-import { useRef, useState } from "react";
-import { api, native, servingTargets, type RouteSettings } from "./api";
+import { useEffect, useRef, useState } from "react";
+import { api, native, servingTargets, type AvailableModel, type RouteSettings } from "./api";
+import { setProviderModels } from "./modelCatalog";
+
+const noModels: AvailableModel[] = [];
 
 export function ModelDiscovery({ settings, disabled, change }: { settings: RouteSettings; disabled: boolean; change: (settings: Partial<RouteSettings>) => void }) {
-  const models = settings.discoveredModels ?? [];
+  const models = settings.discoveredModels ?? noModels;
   const executable = settings.codexExecutable ?? "";
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const operation = useRef(false);
+  useEffect(() => { setProviderModels("openai", models.map((model) => ({ id: model.id, name: model.displayName }))); }, [models]);
   async function discover() {
     if (operation.current) return;
     operation.current = true; setBusy(true); setError("");
@@ -35,6 +39,5 @@ export function ModelDiscovery({ settings, disabled, change }: { settings: Route
           <ul>{models.map((model) => <li key={model.id}><strong>{model.displayName}</strong><code>{model.id}</code><span>{model.supportsImages ? "images" : "text"} · {model.contextWindow?.toLocaleString() ?? "unknown"} context · {model.efforts.join(", ") || "effort not reported"}</span></li>)}</ul></>}
       </fieldset>{error && <p className="editor-warning" role="alert">{error}</p>}
     </div>}
-    <datalist id="account-models">{models.map((model) => <option key={model.id} value={model.id}>{model.displayName}</option>)}</datalist>
   </section>;
 }

@@ -29,6 +29,7 @@ pub async fn discover_models(
     });
     command
         .arg("app-server")
+        .env("PATH", locations.tool_search_path())
         .env("CODEX_HOME", locations.codex_home());
     let input = [
         json!({"method":"initialize", "id":1, "params":{"clientInfo":{"name":"switchyard-desktop", "version":"0.1.0"}}}),
@@ -68,6 +69,7 @@ pub async fn discover_models(
     });
     catalog
         .args(["debug", "models"])
+        .env("PATH", locations.tool_search_path())
         .env("CODEX_HOME", locations.codex_home());
     if let Ok((mut process, output)) = OwnedProcess::capture_limited(&mut catalog, 16 * 1024 * 1024)
     {

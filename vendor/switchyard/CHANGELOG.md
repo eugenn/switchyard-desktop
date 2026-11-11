@@ -36,6 +36,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **TypeScript composite stage profiles** - `CompositeRouter` options take
+  `stage.efficient_first` and `stage.capable_first` profiles in place of
+  `efficient_first_threshold`, `capable_first_threshold`, and
+  `efficient_hold_turns`. Each profile sets `threshold`, `recent_window`, holds,
+  and `capable_system_prompt`. `classifier.cutoff` sets the judge cutoff.
+  `Selection.systemPrompt` returns the routed prompt. Stage state keys gain a
+  `composite.profile_<n>.` prefix. State saved earlier keeps its tier and drops
+  its stage holds. The Pi example adds a planning prompt to capable-first turns.
+  **API and state change (breaking).**
 - **Simpler decision requests and routing question** — `DecisionRequest.context`
   is renamed to `input`. Decision judges send the conversation messages as
   `input`, with string instructions and a description for every choice. The
@@ -57,6 +66,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Windowed classifiers drop empty history turns** - with `recent_turn_window`
+  set, an assistant turn that holds only reasoning, as an OpenAI Chat message
+  with `reasoning_content` and no `content` decodes, is left out of the judge
+  request. Before, it reached the judge as an assistant message with empty text,
+  and an Anthropic Messages judge rejected the request with HTTP 400, which
+  failed the client request.
 - **Responses reasoning history reaches non-OpenAI targets** - the default
   `responses_reasoning` is now `"auto"`. Targets other than OpenAI keep plaintext
   reasoning `summary` and `content` in place, for any `store` value. Before, it

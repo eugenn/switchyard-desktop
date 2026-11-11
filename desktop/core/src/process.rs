@@ -88,9 +88,16 @@ impl OwnedProcess {
             use std::os::windows::process::CommandExt;
             command.creation_flags(0x08000000 | 0x00000200 | 0x00000004);
         }
-        let child = command
-            .spawn()
-            .map_err(|error| format!("Could not launch bundled process: {error}"))?;
+        let child = command.spawn().map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                format!(
+                    "Could not find {}. Install it, or enter the full path to its executable.",
+                    command.get_program().to_string_lossy()
+                )
+            } else {
+                format!("Could not launch bundled process: {error}")
+            }
+        })?;
         #[cfg(windows)]
         {
             use std::{

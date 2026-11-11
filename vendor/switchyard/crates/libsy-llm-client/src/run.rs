@@ -458,23 +458,27 @@ async fn call_one(
     let started = Instant::now();
     let mut routing_usage = None;
     let result = async {
-        let mut response = client?.call(request).await?;
+        let response = async { client?.call(request).await }
+            .await
+            .map_err(|source| LibsyError::client_call(model_id.clone(), source));
+        // Observe dispatch and live I/O once; buffering must not re-observe replay.
+        let mut response = observability::observe_client_call(response)?;
         if is_routing && let LlmResponse::Stream(chunks) = response.llm_response {
-            let (chunks, usage) = buffer_routing_stream(chunks).await?;
+            let (chunks, usage) = buffer_routing_stream(chunks)
+                .await
+                .map_err(|source| LibsyError::client_call(model_id.clone(), source))?;
             routing_usage = usage;
             response.llm_response = LlmResponse::Stream(chunks);
         }
         Ok(response)
     }
-    .await
-    .map_err(|source| LibsyError::client_call(model_id.clone(), source));
+    .await;
     let duration = started.elapsed();
 
     let result = result.map(|mut response| {
         response.set_served_model(model_id);
         response
     });
-    let result = observability::observe_client_call(result);
     let result = if is_routing {
         result
     } else {
@@ -1077,10 +1081,12 @@ impl ClientRouter {
             return Ok(());
         }
         let mut segment = input.messages.to_vec();
-        segment.extend(response.outputs.iter().map(|output| Message {
-            role: output.role,
-            content: output.content.clone(),
-        }));
+        segment.extend(
+            response
+                .outputs
+                .iter()
+                .map(|output| Message::new(output.role, output.content.clone())),
+        );
         let history = Arc::new(MessageHistory::new(
             input.parent.clone(),
             Arc::from(segment),
@@ -2138,16 +2144,16 @@ mod tests {
             .extensions
             .fields
             .insert("previous_response_id".to_string(), json!("msg_stream"));
-        follow.llm_request.messages = vec![Message {
-            role: Role::Tool,
-            content: vec![ContentBlock::ToolResult(ToolResult {
+        follow.llm_request.messages = vec![Message::new(
+            Role::Tool,
+            vec![ContentBlock::ToolResult(ToolResult {
                 tool_call_id: "toolu_stream".to_string(),
                 content: vec![ContentBlock::Text {
                     text: "ready".to_string(),
                 }],
                 is_error: None,
             })],
-        }];
+        )];
         assert!(clients.stored_state_owner(&follow).is_none());
         response
             .llm_response
