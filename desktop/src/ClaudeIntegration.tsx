@@ -82,7 +82,7 @@ export function ClaudeIntegration() {
         <div className="discovery-row"><button type="button" className="button secondary" disabled={!!problem} onClick={() => void saveSettings()}>Save Claude setup</button></div>
       </fieldset>
       {problem && <p className="editor-warning" role="note">{problem}</p>}
-      {enabled && !keySaved && <p className="editor-warning" role="note">Save your Anthropic API key before starting routing: the server needs it to call Claude.</p>}
+      {enabled && !keySaved && <p className="editor-warning" role="note">Without an Anthropic API key the Claude Code route stays off. Codex routing is not affected.</p>}
       {command && <div className="credential-editor"><p>Start routing, then run this in your project directory. Switchyard serves Claude Code on this machine only; the key stays in the server.</p><code className="claude-command">{command}</code><button type="button" className="text-button" disabled={busy} onClick={() => void copy()}>Copy command</button></div>}
       {message && <p className="quiet-note" role="status">{message}</p>}
       {error && <p className="editor-warning" role="alert">{error}</p>}

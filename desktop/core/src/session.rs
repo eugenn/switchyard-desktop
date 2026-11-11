@@ -34,6 +34,7 @@ pub struct DesktopSession {
     message: String,
     codex_profile: Option<CodexProfile>,
     claude_route: bool,
+    claude_waiting_for_key: bool,
     credentials: CredentialVault,
     router_port: u16,
     gateway_port: u16,
@@ -57,6 +58,7 @@ impl DesktopSession {
             message: "Routing is stopped.".into(),
             codex_profile: None,
             claude_route: false,
+            claude_waiting_for_key: false,
             credentials: CredentialVault::current(),
             router_port: 4100,
             gateway_port: 4101,
@@ -183,6 +185,10 @@ impl DesktopSession {
             format!(
                 "{codex} The Claude Code route is on: start Claude Code with the command in Claude setup."
             )
+        } else if self.claude_waiting_for_key {
+            format!(
+                "{codex} The Claude Code route is off: save an Anthropic API key in Claude setup, then start again."
+            )
         } else {
             codex.into()
         };
@@ -198,17 +204,18 @@ impl DesktopSession {
         } else {
             None
         };
-        // The Claude Code route is optional. When both Claude models are saved it is
-        // served by this same server, authenticated upstream with the Anthropic key.
+        // The Claude Code route is optional and never blocks Codex. It is served by this
+        // same server only when both Claude models and an Anthropic key are saved; a
+        // setup without a key just leaves the route off and says so.
         let claude = ClaudeSettings::load(&self.locations)?;
         let claude_key = if claude.enabled() {
-            Some(self.credentials.anthropic_key()?.ok_or(
-                "Save the Anthropic API key in the system credential vault before starting Claude Code routing.",
-            )?)
+            self.credentials.anthropic_key()?
         } else {
             None
         };
-        let switchyard = if claude.enabled() {
+        let claude_on = claude_key.is_some();
+        self.claude_waiting_for_key = claude.enabled() && !claude_on;
+        let switchyard = if claude_on {
             let mut document: toml::Table = preview
                 .switchyard
                 .parse()
@@ -308,7 +315,7 @@ impl DesktopSession {
         let profile = Some(CodexProfile::install(&self.locations, &preview.codex)?);
         self.locations.save_settings(settings)?;
         self.codex_profile = profile;
-        self.claude_route = claude.enabled();
+        self.claude_route = claude_on;
         self.litellm = litellm;
         self.server = Some(server);
         Ok(())
@@ -363,6 +370,7 @@ impl DesktopSession {
         self.server.take();
         self.litellm.take();
         self.claude_route = false;
+        self.claude_waiting_for_key = false;
         self.message = match self.codex_profile.take().map(|mut profile| profile.remove()) {
             Some(Err(error)) => format!("Routing is stopped. {error}"),
             Some(Ok(())) => "Routing is stopped. The generated Codex profile was removed; config.toml is unchanged.".into(),
@@ -474,11 +482,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn claude_route_refuses_to_start_without_the_anthropic_key_and_writes_nothing() {
+    async fn saved_claude_models_without_a_key_never_block_the_codex_start() {
         let directory = tempfile::tempdir().unwrap();
         let locations = UserDataLocations::injected(directory.path().join("app"));
         claude_models().save(&locations).unwrap();
-        let before = std::fs::read_dir(locations.root()).unwrap().count();
         let mut session = DesktopSession::new(
             locations.clone(),
             RuntimeLayout::bundled(directory.path().join("missing-runtime")),
@@ -489,15 +496,42 @@ mod tests {
             algorithm: Algorithm::Noop,
             ..Default::default()
         };
-        let error = session.start(&settings).await.unwrap_err();
-        assert!(error.contains("Anthropic API key"), "{error}");
-        assert!(!session.status().running);
-        assert!(!locations.root().join("routes.toml").exists());
-        assert_eq!(std::fs::read_dir(locations.root()).unwrap().count(), before);
-        // A configured Claude route never changes the Codex-only path.
-        ClaudeSettings::default().save(&locations).unwrap();
+        // Without a key the Claude route is skipped, so start gets as far as the
+        // runtime check instead of failing on the missing Anthropic key.
         let error = session.start(&settings).await.unwrap_err();
         assert!(error.contains("Bundled runtime is not ready"), "{error}");
+        assert!(!error.contains("Anthropic"), "{error}");
+        assert!(!locations.root().join("routes.toml").exists());
+        assert!(!session.status().running);
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a prepared bundled runtime; uses ephemeral ports and no account or network"]
+    async fn without_a_key_codex_starts_and_the_claude_route_stays_off() {
+        let directory = tempfile::tempdir().unwrap();
+        let locations = UserDataLocations::injected(directory.path().join("app"));
+        claude_models().save(&locations).unwrap();
+        let runtime = RuntimeLayout::bundled(
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../src-tauri/runtime"),
+        );
+        let mut session = DesktopSession::new(locations.clone(), runtime).unwrap();
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        session.router_port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let settings = RouteSettings {
+            algorithm: Algorithm::Noop,
+            ..Default::default()
+        };
+        let status = session.start(&settings).await.unwrap();
+        assert!(status.running);
+        assert!(
+            status.message.contains("Claude Code route is off"),
+            "{}",
+            status.message
+        );
+        let routes = std::fs::read_to_string(locations.root().join("routes.toml")).unwrap();
+        assert!(!routes.contains("claude"), "{routes}");
+        assert!(!session.stop().message.contains("Claude Code route"));
     }
 
     #[tokio::test]

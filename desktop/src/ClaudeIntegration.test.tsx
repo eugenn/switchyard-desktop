@@ -47,7 +47,7 @@ it("saves the key to the vault, clears the field and never echoes it back", asyn
   vi.mocked(api.anthropicKeyStatus).mockResolvedValue(false);
   await open();
   expect(screen.getByRole("status").textContent).toBe("No Anthropic key saved.");
-  expect(screen.getByText(/Save your Anthropic API key before starting routing/)).toBeTruthy();
+  expect(screen.getByText(/Without an Anthropic API key the Claude Code route stays off/)).toBeTruthy();
   const input = screen.getByLabelText("Anthropic API key") as HTMLInputElement;
   expect(input.type).toBe("password");
   expect(screen.getByRole("button", { name: "Save API key" })).toHaveProperty("disabled", true);
@@ -57,7 +57,7 @@ it("saves the key to the vault, clears the field and never echoes it back", asyn
   await screen.findByText("An Anthropic key is saved in the system credential vault.");
   expect(input.value).toBe("");
   expect(document.body.textContent).not.toContain("sk-ant-test-not-a-real-key");
-  expect(screen.queryByText(/Save your Anthropic API key before starting routing/)).toBeNull();
+  expect(screen.queryByText(/Without an Anthropic API key the Claude Code route stays off/)).toBeNull();
 });
 
 it("removes the key from the vault", async () => {

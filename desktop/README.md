@@ -68,7 +68,8 @@ with your key, including the classifier calls that make the choice.
    Clearing both fields turns the Claude Code route off.
 4. Start routing (**Save and start**). The Claude Code route is added to the server
    only while both models and a key are saved, and only for that run: change the
-   setup, then stop and start again.
+   setup, then stop and start again. Without a key the route stays off and Codex
+   starts normally; the status message says so.
 5. Copy the launch command from **Set up Claude**, open Terminal in your project
    folder and run it. It looks like this (POSIX shell):
 
