@@ -14,7 +14,7 @@ there and run the affected crate tests. Preserve published commits and release
 tags; do not rebase history already referenced by desktop releases.
 
 The current snapshot imports maintained fork commit
-`d9b1f692471e924549cde7a98d2ec56a8b482ad5` with tracked working-tree changes.
+`11acea2efba5e91f07208b7bf096e2e593623dc4` with tracked working-tree changes.
 It includes the fork's routing work, LiteLLM session headers, agent identity in
 routing logs, and the latest integrated upstream changes. Use the manifest's
 `upstream_commit` and `commit` to inspect committed differences in the core
@@ -23,7 +23,10 @@ checkout, and its file hashes to verify the imported sources.
 The development snapshot also includes [PR #1001](https://github.com/NVIDIA-NeMo/Switchyard/pull/1001),
 commit `5438bd3d2eae5269e3736c622494da00975a99ab`, applied in the core working tree
 without creating a commit. It forwards a caller-provided `x-litellm-session-id`
-header by default. It does not generate a session ID. The manifest marks this
+header by default. It does not generate a session ID. The snapshot also retains
+the existing opt-in `forward_codex_session_id` mapping used by the desktop's
+LiteLLM clients; see [session forwarding](codex-litellm-session-id.md).
+The manifest marks this
 snapshot with `includes_tracked_worktree_changes = true`; public releases require
 committing and publishing the core changes, then importing a clean snapshot.
 
@@ -34,7 +37,11 @@ import whose recorded commit is published in the maintained fork.
 
 ## November 2026 desktop integration
 
-The snapshot integrates NVIDIA commit `c365efe832822541024704aadf6a0d5c81cc0528`.
+The snapshot integrates NVIDIA commit `62e59f68620dbe725742d454b5797f886af371c0`.
+The November 11 refresh includes the already-merged upstream fixes for Responses
+streams, tool translation, Codex compaction history, target identity and routing
+defaults. The source checkout's existing session-forwarding changes are preserved;
+no new core changes were made during the desktop import.
 The desktop keeps `plan_execute` as a saved preset identifier, but emits
 `type = "stage_router"`. Its preset starts capable with `picker = "capable_first"`,
 `confidence_threshold = 0.0`, `capable_hold_turns = 0`, and

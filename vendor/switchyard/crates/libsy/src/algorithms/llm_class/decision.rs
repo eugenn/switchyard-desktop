@@ -275,7 +275,9 @@ impl Classifier for DecisionClassifier {
 pub struct DirectClassifierConfig {
     /// Categories the service may select. Their names are the option IDs.
     pub options: Vec<Category>,
+    /// Replaces the default instructions sent to the decision service.
     pub instructions: Option<String>,
+    /// Custom choices. IDs must match every category in `options` exactly once.
     pub choices: Option<Vec<DecisionChoice>>,
     /// Routes to the default target when the decision call fails or returns an
     /// invalid choice.

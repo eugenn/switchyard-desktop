@@ -95,8 +95,8 @@ impl TaskClassifierVerdict {
 /// Keeps the opening task and the last `recent_turn_window` turns after it. A
 /// window of `0` keeps the task alone.
 ///
-/// Inbound decoders normalize client system and developer content into
-/// `LlmRequest::instructions`, so it never reaches this list.
+/// Inline system and developer messages are kept, in their original order,
+/// ahead of the task.
 ///
 /// Selects by reference and clones only what survives — a coding-agent
 /// conversation carries every tool result, so cloning it whole to keep a window
@@ -186,14 +186,16 @@ fn task_messages(messages: &[Message]) -> Vec<Message> {
     [Some(opening_task), user_messages.next_back()]
         .into_iter()
         .flatten()
-        .map(|message| Message {
-            role: Role::User,
-            content: message
-                .content
-                .iter()
-                .filter(|block| is_task_content(block))
-                .cloned()
-                .collect(),
+        .map(|message| {
+            Message::new(
+                Role::User,
+                message
+                    .content
+                    .iter()
+                    .filter(|block| is_task_content(block))
+                    .cloned()
+                    .collect(),
+            )
         })
         .collect()
 }
@@ -215,11 +217,16 @@ impl TaskInput {
         // Reasoning is provider-private and not required to classify the task. Some
         // upstreams also reject an unsigned reasoning item replayed without the
         // opaque state it was issued with, so it cannot travel through a windowed
-        // classifier request as ordinary history.
+        // classifier request as ordinary history. Empty text goes with it: OpenAI
+        // Chat decoding leaves an empty text placeholder beside the reasoning of a
+        // reasoning-only turn, and an Anthropic judge rejects a message whose text
+        // block is empty.
         for message in &mut messages {
-            message
-                .content
-                .retain(|block| !matches!(block, ContentBlock::Reasoning { .. }));
+            message.content.retain(|block| match block {
+                ContentBlock::Reasoning { .. } => false,
+                ContentBlock::Text { text } => !text.is_empty(),
+                _ => true,
+            });
         }
         messages.retain(|message| !message.content.is_empty());
         messages
@@ -1568,9 +1575,9 @@ mod tests {
             ..DecisionJudgeConfig::default()
         };
         let mut request = classify_session_request();
-        request.llm_request.messages.push(Message {
-            role: Role::Assistant,
-            content: vec![
+        request.llm_request.messages.push(Message::new(
+            Role::Assistant,
+            vec![
                 ContentBlock::Reasoning {
                     text: "private reasoning".into(),
                     signature: None,
@@ -1580,7 +1587,7 @@ mod tests {
                     text: "visible progress".into(),
                 },
             ],
-        });
+        ));
         request
             .llm_request
             .messages
@@ -2165,27 +2172,27 @@ mod tests {
     }
 
     fn tool_call(id: &str) -> Message {
-        Message {
-            role: Role::Assistant,
-            content: vec![ContentBlock::ToolCall(ToolCall {
+        Message::new(
+            Role::Assistant,
+            vec![ContentBlock::ToolCall(ToolCall {
                 id: id.to_string(),
                 name: "search".to_string(),
                 arguments: Value::Null,
             })],
-        }
+        )
     }
 
     fn tool_result(id: &str) -> Message {
-        Message {
-            role: Role::Tool,
-            content: vec![ContentBlock::ToolResult(ToolResult {
+        Message::new(
+            Role::Tool,
+            vec![ContentBlock::ToolResult(ToolResult {
                 tool_call_id: id.to_string(),
                 content: vec![ContentBlock::Text {
                     text: "tool output".to_string(),
                 }],
                 is_error: None,
             })],
-        }
+        )
     }
 
     #[test]
@@ -2325,16 +2332,16 @@ mod tests {
     /// The shape an inbound decoder gives a tool result whose call it reports
     /// separately: a user-role message whose only content answers that call.
     fn user_tool_result(id: &str) -> Message {
-        Message {
-            role: Role::User,
-            content: vec![ContentBlock::ToolResult(ToolResult {
+        Message::new(
+            Role::User,
+            vec![ContentBlock::ToolResult(ToolResult {
                 tool_call_id: id.to_string(),
                 content: vec![ContentBlock::Text {
                     text: "tool output".to_string(),
                 }],
                 is_error: None,
             })],
-        }
+        )
     }
 
     /// Every turn of a coding-agent loop ends on the result of the call it just
@@ -2362,9 +2369,9 @@ mod tests {
         let messages = vec![
             Message::text(Role::User, "initial task"),
             tool_call("call-1"),
-            Message {
-                role: Role::User,
-                content: vec![
+            Message::new(
+                Role::User,
+                vec![
                     ContentBlock::ToolResult(ToolResult {
                         tool_call_id: "call-1".to_string(),
                         content: vec![ContentBlock::Text {
@@ -2376,7 +2383,7 @@ mod tests {
                         text: "and now ship it".to_string(),
                     },
                 ],
-            },
+            ),
         ];
 
         assert_eq!(
@@ -2410,9 +2417,9 @@ mod tests {
         let messages = vec![
             Message::text(Role::System, "client instructions"),
             Message::text(Role::User, "initial task"),
-            Message {
-                role: Role::Assistant,
-                content: vec![
+            Message::new(
+                Role::Assistant,
+                vec![
                     ContentBlock::Reasoning {
                         text: "private chain of thought".to_string(),
                         signature: None,
@@ -2422,17 +2429,17 @@ mod tests {
                         text: "visible answer".to_string(),
                     },
                 ],
-            },
+            ),
             tool_call("call-1"),
             tool_result("call-1"),
-            Message {
-                role: Role::Assistant,
-                content: vec![ContentBlock::Reasoning {
+            Message::new(
+                Role::Assistant,
+                vec![ContentBlock::Reasoning {
                     text: "reasoning-only turn".to_string(),
                     signature: None,
                     details: Vec::new(),
                 }],
-            },
+            ),
             Message::text(Role::User, "follow-up"),
         ];
         let request = Request {
@@ -2467,6 +2474,63 @@ mod tests {
         // rather than left behind empty — plus the trailing routing instruction.
         assert_eq!(built.len(), 7);
         assert!(built.iter().all(|message| !message.content.is_empty()));
+    }
+
+    #[test]
+    fn a_window_drops_a_turn_left_empty_once_its_reasoning_is_removed() {
+        // OpenAI Chat decoding places an empty text placeholder beside the reasoning of
+        // an assistant message that carries `reasoning_content` alone. Removing the
+        // reasoning has to take the placeholder with it: an Anthropic judge rejects a
+        // message whose text is empty, and the whole client request then fails.
+        let body = serde_json::json!({
+            "model": "qa/windowed",
+            "messages": [
+                {"role": "user", "content": "Reply with the number four."},
+                {"role": "assistant", "reasoning_content": "private chain of thought"},
+                {"role": "user", "content": "This is still a simple number lookup."}
+            ]
+        });
+        let request = Request {
+            llm_request: switchyard_translation::decode_request(
+                switchyard_translation::WireFormat::OpenAiChat,
+                &body,
+            )
+            .expect("client request decodes"),
+            ..Request::default()
+        };
+
+        let built = TaskInput {
+            recent_turn_window: Some(8),
+        }
+        .build_messages(&State::default(), &request);
+
+        assert_eq!(
+            built,
+            vec![
+                Message::text(Role::User, "Reply with the number four."),
+                Message::text(Role::User, "This is still a simple number lookup."),
+                Message::text(Role::User, TRAILING_ROUTING_INSTRUCTION),
+            ]
+        );
+        let judge_request = LlmRequest {
+            messages: built,
+            ..LlmRequest::default()
+        };
+        let encoded = switchyard_translation::encode_request(
+            &judge_request,
+            switchyard_translation::WireFormat::AnthropicMessages,
+        )
+        .expect("judge request encodes");
+        let has_empty_text = encoded["messages"]
+            .as_array()
+            .expect("messages")
+            .iter()
+            .flat_map(|message| match &message["content"] {
+                Value::Array(blocks) => blocks.iter().map(|block| &block["text"]).collect(),
+                content => vec![content],
+            })
+            .any(|text| text.as_str().is_some_and(str::is_empty));
+        assert!(!has_empty_text, "{encoded}");
     }
 
     #[test]
