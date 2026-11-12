@@ -12,7 +12,7 @@ Lighter models for routine work, more capable ones when it matters, with no manu
 [![Built with Tauri, React and Rust](https://img.shields.io/badge/built%20with-Tauri%20%C2%B7%20React%20%C2%B7%20Rust-24c8db)](desktop/README.md)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-[Run it](#run-on-macos) · [Codex](#start-routing-codex) · [Claude Code](#use-claude-code-with-an-anthropic-api-key) · [Migrate](#existing-installations) · [Status](#development-and-limitations)
+[Run it](#run-on-macos) · [Providers](#connect-providers-then-route) · [Codex](#start-routing-codex) · [Claude Code](#use-claude-code-with-an-anthropic-api-key) · [Migrate](#existing-installations) · [Status](#development-and-limitations)
 
 </div>
 
@@ -23,6 +23,27 @@ an independently maintained [core fork](https://github.com/eugenn/Switchyard).
 It is not affiliated with NVIDIA, OpenAI or Anthropic. The only application lives in
 [`desktop/`](desktop/README.md), built with Tauri, React and Rust; its source,
 runtime inputs, resources and build tools are all there.
+
+## Connect providers, then route
+
+<table>
+  <tr>
+    <td width="50%"><img src="images/routing/providers.png" alt="Providers page with the ChatGPT plan signed in and Anthropic and OpenRouter connected by API key"></td>
+    <td width="50%"><img src="images/routing/routing.png" alt="Routing canvas mixing the ChatGPT plan, Anthropic and an OpenRouter judge"></td>
+  </tr>
+  <tr>
+    <td valign="top"><b>Providers</b><br>Connect the providers you have: the ChatGPT plan by sign-in, or API keys for OpenAI, Anthropic and OpenRouter. Each card shows its status, the last characters of the key, a free connection check with the model list, and which models in the route use it. Keys stay in the system credential vault.</td>
+    <td valign="top"><b>Routing</b><br>Pick a strategy and see the route as a live diagram: Request, then a rule or a task judge, then the model slots. One route can mix providers, here Efficient on the ChatGPT plan, Capable on Anthropic and the judge on OpenRouter. <b>Play a session</b> walks through how the strategy decides, step by step.</td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="images/routing/model-picker.png" alt="Model picker listing models from every connected provider with Plan and API badges"></td>
+    <td width="50%"><img src="images/routing/judge-mercury.png" alt="Task judge using Mercury Decide with a decision cutoff slider"></td>
+  </tr>
+  <tr>
+    <td valign="top"><b>Model picker</b><br>Every model field lists models from all connected providers, grouped by connection, with a <b>Plan</b> or <b>API</b> badge so you can see how each model is billed. Typed model IDs work too.</td>
+    <td valign="top"><b>Task judge</b><br>A judge can be any connected chat model, or a decision model: Jev through TypeSafe, or Mercury Decide through OpenRouter. The cutoff slider shows when a task moves from Efficient to Capable.</td>
+  </tr>
+</table>
 
 ## See where your requests go
 
@@ -41,13 +62,14 @@ runtime inputs, resources and build tools are all there.
 
 | Integration | How it works | What you need |
 | --- | --- | --- |
-| Codex / ChatGPT | Codex sends requests to the local Switchyard server, which selects a model and calls the bundled LiteLLM gateway. | Codex CLI, account access to the chosen models, and a separate ChatGPT sign-in through the app. |
+| Codex / ChatGPT plan | Codex sends requests to the local Switchyard server, which selects a model and calls the bundled LiteLLM gateway for models in your plan. | Codex CLI, account access to the chosen models, and a separate ChatGPT sign-in on the Providers page. |
+| OpenAI, Anthropic, OpenRouter API | Models chosen from these connections are called directly with your API key, billed per token. One route can mix them with the ChatGPT plan. | An API key for each provider you use, saved on the Providers page. A Claude subscription does not include API access. |
 | Claude Code | Claude Code sends requests to the local Switchyard server, which selects between two Claude models and calls Anthropic with your API key. | Claude Code, an Anthropic API key (billed to your API account, not a Claude subscription) and access to both models. Development preview; live-key testing still needed. |
-| Jev / TypeSafe | Optional service that helps choose the model; it does not write the final answer. | A TypeSafe API key. Classification requests are separate from your model usage. |
+| Jev / TypeSafe, Mercury Decide | Optional decision models that help choose the model; they do not write the final answer. | A TypeSafe API key for Jev, or your OpenRouter key for Mercury Decide. Classification requests are separate from your model usage. |
 
 Claude Code uses the same local server as Codex but its own Claude route, so its
 requests also appear in Activity. There is no Claude subscription sign-in: the app
-never handles Claude Code tokens. Gemini has no account setup flow in this app yet.
+never handles Claude Code tokens. Gemini and local models have no connection in this app yet.
 Supported models and usage limits depend on your provider.
 
 ## Run on macOS
@@ -79,9 +101,12 @@ It still needs native build and runtime acceptance on Windows.
 ## Start routing Codex
 
 1. Install Codex CLI separately and sign in to the account you want to use.
-2. In the app's **Routing** page, discover the models available to your account.
-3. Choose a routing strategy and assign models. Review the generated configuration.
-4. Complete the ChatGPT sign-in when needed, save your settings and start routing.
+2. On the app's **Providers** page, sign in with ChatGPT and load your account's
+   models, and add API keys for any other providers you want to use.
+3. On **Routing**, choose a strategy and pick a model for each slot from any
+   connected provider. Review the generated configuration.
+4. Save your settings and start routing. The status bar names any slot whose
+   provider is not connected yet.
 5. In your project folder, run:
 
    ```sh
@@ -98,7 +123,8 @@ reported rather than freed by stopping someone else's process.
 
 Claude Code is Anthropic's program for working with code in Terminal, separate
 from the Claude website and desktop app. In **Routing > Set up Claude**, save your
-Anthropic API key (it goes to the system credential vault), choose two models,
+Anthropic API key (it goes to the system credential vault and is the same key as
+the Anthropic connection on **Providers**), choose two models,
 start routing, and run the launch command the app shows. The server calls
 Anthropic with your key; Claude Code never sees it. Usage is billed to your
 Anthropic API account.
