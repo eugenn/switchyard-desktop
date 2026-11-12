@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Activity } from "./Activity";
 import { api } from "./api";
@@ -77,5 +77,57 @@ describe("activity parity", () => {
     expect(within(map).getByText("Efficient")).toBeTruthy();
     expect(within(map).queryByText(/gpt-codex/)).toBeNull();
     expect(within(map).queryByText("codex")).toBeNull();
+  });
+
+  it("keeps the error count's meaning when classifier calls fail or a route falls back", async () => {
+    vi.mocked(api.history).mockResolvedValue([]);
+    vi.mocked(api.modelPrices).mockResolvedValue({});
+    const stats = { total_errors: 3, classifier: { total_requests: 26, total_errors: 4 }, routing_fallbacks: { "a→b": 2 } };
+    render(<Activity settings={{ algorithm: "passthrough", efficientModel: "m", capableModel: "" }} stats={stats} statsError="" running onOpenRequests={() => {}} onConfigure={() => {}} />);
+    const summary = await screen.findByRole("region", { name: "Summary" });
+    const stat = within(summary).getByText("3").closest(".act-stat")!;
+    expect(stat.textContent).toContain("model errors since start");
+    expect(stat.textContent).toContain("4 classifier failed");
+    expect(stat.getAttribute("title")).toContain("4 of 26 classifier calls failed.");
+    expect(stat.getAttribute("title")).toContain("Fallback a→b: 2.");
+  });
+
+  it("ends an idle session's timeline at its last turn instead of now", async () => {
+    const last = Date.now() - 2 * 3600_000;
+    vi.mocked(api.history).mockResolvedValue([{ session_id: "old", model: "m", ts: last, prompt_tokens: 10 }, { session_id: "old", model: "m", ts: last - 60_000, prompt_tokens: 10 }]);
+    vi.mocked(api.modelPrices).mockResolvedValue({});
+    render(<Activity settings={{ algorithm: "passthrough", efficientModel: "m", capableModel: "" }} stats={null} statsError="" running onOpenRequests={() => {}} onConfigure={() => {}} />);
+    const map = await screen.findByRole("region", { name: "Where requests go" });
+    expect(await within(map).findByText(/idle 2 h/)).toBeTruthy();
+    expect(within(map).queryByText("now")).toBeNull();
+  });
+
+  it("drops a model filter that the newly picked session has no lane for", async () => {
+    const now = Date.now();
+    vi.mocked(api.history).mockResolvedValue([
+      { session_id: "a", model: "m", ts: now, prompt_tokens: 10 },
+      { session_id: "b", model: "n", ts: now - 1000, prompt_tokens: 10 },
+    ]);
+    vi.mocked(api.modelPrices).mockResolvedValue({});
+    const latency = { count: 1, p50_ms: 1000, p99_ms: 2000 };
+    const stats = { models: { m: { calls: 1, total_latency: latency }, n: { calls: 1, total_latency: latency } } };
+    render(<Activity settings={{ algorithm: "random", efficientModel: "m", capableModel: "n" }} stats={stats} statsError="" running onOpenRequests={() => {}} onConfigure={() => {}} />);
+    fireEvent.click(await screen.findByRole("button", { name: /^[^,]+, m, / }));
+    const card = screen.getByRole("region", { name: "Latency" });
+    expect(within(card).getByText("m · p50 / p99, s")).toBeTruthy();
+    fireEvent.change(screen.getByRole("combobox", { name: "Session" }), { target: { value: "b" } });
+    expect(await within(card).findByText("p50 / p99, seconds")).toBeTruthy();
+  });
+
+  it("reports both failures and shows no counts it could not read", async () => {
+    vi.mocked(api.history).mockRejectedValue("Permission denied");
+    vi.mocked(api.modelPrices).mockResolvedValue({});
+    render(<Activity settings={{ algorithm: "passthrough", efficientModel: "m", capableModel: "" }} stats={null} statsError="not ready" running onOpenRequests={() => {}} onConfigure={() => {}} />);
+    const alert = await screen.findByRole("alert");
+    await waitFor(() => expect(alert.textContent).toContain("Routing log unavailable: Permission denied"));
+    expect(alert.textContent).toContain("Statistics unavailable: not ready");
+    expect(screen.getByText("The routing log could not be read, so no turns are shown.")).toBeTruthy();
+    const summary = screen.getByRole("region", { name: "Summary" });
+    expect(within(summary).queryByText("0")).toBeNull();
   });
 });
