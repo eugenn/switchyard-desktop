@@ -10,7 +10,15 @@ export interface RoutingRole {
   systemPrompt?: string | null; effort?: string | null; tags: string[]; groupIDs: string[]; isBuiltIn: boolean;
 }
 export interface RoleGroup { id: string; name: string; projectPath: string; routingProfile?: RouteSettings | null }
-export interface ModelTarget { key: string; model: string; roleId: string | null; nativeOptions: string }
+/** Connections a model can be served by: the ChatGPT plan or a provider API key. */
+export type ConnectionId = "chatgpt" | "openai" | "anthropic" | "openrouter";
+export type DecisionEngine = "jev" | "mercury";
+export interface ModelTarget {
+  key: string; model: string; roleId: string | null; nativeOptions: string;
+  connection?: ConnectionId;
+  /** Legacy provider, read for setups saved before connections. */
+  provider?: "openai" | "anthropic" | "openrouter";
+}
 export interface RouteSettings {
   algorithm: Algorithm;
   efficientModel: string;
@@ -39,7 +47,12 @@ export interface RouteSettings {
   manageCodexProfile?: boolean;
   discoveredModels?: AvailableModel[];
   codexExecutable?: string;
-  jevClassifier?: { modelID: string; cutoff: number; instructions: string } | null;
+  /** A decision model (Jev or Mercury Decide) in place of an LLM judge. */
+  jevClassifier?: { modelID: string; cutoff: number; instructions: string; engine?: DecisionEngine } | null;
+  /** Legacy OpenAI access, read for setups saved before connections. */
+  openaiAuth?: "subscription" | "api_key";
+  /** Connection that serves a separate LLM judge. */
+  judgeConnection?: ConnectionId;
 }
 export const builtInRoles = shippedRoles as RoutingRole[];
 export function servingTargets(settings: RouteSettings): ModelTarget[] {
@@ -96,6 +109,9 @@ export const api = {
   claudeLaunchCommand: (settings: ClaudeSettings) => invoke<string>("claude_launch_command", { settings }),
   anthropicKeyStatus: () => invoke<boolean>("anthropic_key_status"),
   saveAnthropicKey: (key: string) => invoke<void>("save_anthropic_key", { key }),
+  connections: () => invoke<Connection[]>("connections"),
+  saveConnectionKey: (connection: KeyedConnection, key: string) => invoke<void>("save_connection_key", { connection, key }),
+  refreshConnection: (connection: KeyedConnection) => invoke<Connection>("refresh_connection", { connection }),
   typesafeKeyStatus: () => invoke<boolean>("typesafe_key_status"),
   saveTypesafeKey: (key: string) => invoke<void>("save_typesafe_key", { key }),
   saveLibrary: (roles: RoutingRole[], groups: RoleGroup[]) => invoke<void>("save_role_library", { roles, groups }),
@@ -128,4 +144,42 @@ export function validationMessage(settings: RouteSettings): string | null {
   if (algorithm.judge && !settings.jevClassifier && !settings.judgeTarget && !/^[a-zA-Z0-9._:/-]{1,200}$/.test(settings.judgeModel ?? "")) return "Choose a judge model or an existing judge target.";
   if (settings.algorithm === "prefill_router" && !settings.nativeRouteOptions?.trim() && !settings.checkpoint?.trim()) return "Prefill requires a checkpoint and a feature-enabled server.";
   return null;
+}
+
+export type KeyedConnection = Exclude<ConnectionId, "chatgpt"> | "typesafe";
+export interface Connection {
+  id: ConnectionId | "typesafe";
+  connected: boolean;
+  keyHint: string;
+  models: AvailableModel[];
+  refreshedAt: number | null;
+  checkedAt: number | null;
+  latencyMs: number | null;
+  error: string;
+}
+
+export const connectionIds: ConnectionId[] = ["chatgpt", "openai", "anthropic", "openrouter"];
+export const connectionInfo: Record<ConnectionId | "typesafe", { name: string; short: string; billing: "Plan" | "API" | "Key" }> = {
+  chatgpt: { name: "ChatGPT plan", short: "ChatGPT", billing: "Plan" },
+  openai: { name: "OpenAI API", short: "OpenAI", billing: "API" },
+  anthropic: { name: "Anthropic", short: "Anthropic", billing: "API" },
+  openrouter: { name: "OpenRouter", short: "OpenRouter", billing: "API" },
+  typesafe: { name: "TypeSafe", short: "TypeSafe", billing: "Key" },
+};
+
+/** The connection a model uses: its own, else the legacy provider and OpenAI access. Mirrors RouteSettings::connection_of. */
+export function connectionOf(settings: RouteSettings, target: Pick<ModelTarget, "connection" | "provider">): ConnectionId {
+  if (target.connection && connectionIds.includes(target.connection)) return target.connection;
+  if (target.provider === "anthropic" || target.provider === "openrouter") return target.provider;
+  return settings.openaiAuth === "api_key" ? "openai" : "chatgpt";
+}
+
+/** Connections the setup needs to start. Mirrors RouteSettings::used_connections. */
+export function usedConnections(settings: RouteSettings): Set<ConnectionId | "typesafe"> {
+  const used = new Set<ConnectionId | "typesafe">();
+  if (settings.algorithm === "noop") return used;
+  for (const target of [...servingTargets(settings), ...(settings.additionalTargets ?? [])]) used.add(connectionOf(settings, target));
+  if (settings.jevClassifier) used.add(settings.jevClassifier.engine === "mercury" ? "openrouter" : "typesafe");
+  else if (!settings.judgeTarget && (settings.judgeModel || algorithms.find((item) => item.value === settings.algorithm)!.judge)) used.add(connectionOf(settings, { connection: settings.judgeConnection }));
+  return used;
 }

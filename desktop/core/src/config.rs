@@ -117,6 +117,13 @@ pub struct ModelTarget {
     pub model: String,
     pub role_id: Option<String>,
     pub native_options: String,
+    /// Connection that serves this target: `chatgpt`, `openai`, `anthropic` or
+    /// `openrouter`. Empty falls back to the legacy provider and OpenAI access.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub connection: String,
+    /// Legacy provider field, read for setups saved before connections.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub provider: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -126,6 +133,9 @@ pub struct JevConfiguration {
     pub model_id: String,
     pub cutoff: f64,
     pub instructions: String,
+    /// Decision model family: empty or "jev" for Jev on TypeSafe, "mercury" for Mercury Decide.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub engine: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -186,6 +196,13 @@ pub struct RouteSettings {
     pub discovered_models: Vec<crate::AvailableModel>,
     #[serde(default)]
     pub codex_executable: String,
+    /// How OpenAI models are reached: empty or "subscription" for the ChatGPT
+    /// sign-in, "api_key" for an OpenAI API key.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub openai_auth: String,
+    /// Connection that serves a separate LLM judge; empty follows the legacy OpenAI access.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub judge_connection: String,
 }
 
 fn enabled() -> bool {
@@ -237,6 +254,7 @@ impl RouteSettings {
             model: self.efficient_model.clone(),
             role_id: self.efficient_role_id.clone(),
             native_options: self.efficient_options.clone(),
+            ..Default::default()
         }];
         if !matches!(self.algorithm, Algorithm::Passthrough | Algorithm::Advisor) {
             targets.push(ModelTarget {
@@ -244,13 +262,85 @@ impl RouteSettings {
                 model: self.capable_model.clone(),
                 role_id: self.capable_role_id.clone(),
                 native_options: self.capable_options.clone(),
+                ..Default::default()
             });
         }
         targets
     }
 
     pub fn validate(&self) -> Result<()> {
+        if self.openai_auth.len() > 40
+            || !matches!(self.openai_auth.as_str(), "" | "subscription" | "api_key")
+        {
+            return Err("Choose a supported OpenAI access method.".into());
+        }
+        if self
+            .targets
+            .iter()
+            .chain(&self.additional_targets)
+            .any(|target| {
+                !matches!(
+                    target.provider.as_str(),
+                    "" | "openai" | "anthropic" | "openrouter"
+                ) || !(target.connection.is_empty()
+                    || CONNECTIONS.contains(&target.connection.as_str()))
+            })
+            || !(self.judge_connection.is_empty()
+                || CONNECTIONS.contains(&self.judge_connection.as_str()))
+        {
+            return Err("Choose a supported provider connection for each model.".into());
+        }
+        if self
+            .jev_classifier
+            .as_ref()
+            .is_some_and(|jev| !matches!(jev.engine.as_str(), "" | "jev" | "mercury"))
+        {
+            return Err("Choose Jev or Mercury Decide as the decision model.".into());
+        }
         self.document().map(|_| ())
+    }
+
+    /// Client that serves a target from `provider` under the chosen OpenAI access.
+    /// The connection a model uses: its own, else the legacy provider and OpenAI access.
+    pub fn connection_of(&self, connection: &str, provider: &str) -> &'static str {
+        if let Some(found) = CONNECTIONS.iter().find(|id| **id == connection) {
+            return found;
+        }
+        match provider {
+            "anthropic" => "anthropic",
+            "openrouter" => "openrouter",
+            _ if self.openai_auth == "api_key" => "openai",
+            _ => "chatgpt",
+        }
+    }
+
+    /// Switchyard client for a connection. The ChatGPT plan keeps the gateway client name `openai`.
+    fn target_client(&self, target: &ModelTarget) -> &'static str {
+        client_for(self.connection_of(&target.connection, &target.provider))
+    }
+
+    /// Connections the setup needs, so start can ask for exactly those.
+    pub fn used_connections(&self) -> BTreeSet<&'static str> {
+        let mut used: BTreeSet<&'static str> = self
+            .serving_targets()
+            .iter()
+            .chain(&self.additional_targets)
+            .map(|target| self.connection_of(&target.connection, &target.provider))
+            .collect();
+        if self.jev_classifier.is_none()
+            && self.judge_target.is_none()
+            && !self.judge_model.is_empty()
+        {
+            used.insert(self.connection_of(&self.judge_connection, ""));
+        }
+        if let Some(jev) = &self.jev_classifier {
+            used.insert(if jev.engine == "mercury" {
+                "openrouter"
+            } else {
+                "typesafe"
+            });
+        }
+        used
     }
 
     pub fn validate_library(&self) -> Result<()> {
@@ -319,7 +409,7 @@ impl RouteSettings {
                 self.algorithm,
                 Algorithm::Capability | Algorithm::LlmClassifier | Algorithm::Composite
             ) {
-                return Err("Jev is supported for Capability, Custom and Composite only.".into());
+                return Err("Decision models (Jev, Mercury Decide) are supported for Capability, Custom and Composite only.".into());
             }
             valid_model(&jev.model_id)?;
             if !jev.cutoff.is_finite()
@@ -327,7 +417,7 @@ impl RouteSettings {
                 || jev.instructions.len() > 65536
             {
                 return Err(
-                    "Jev requires a cutoff between 0 and 1 and instructions up to 64 KiB.".into(),
+                    "A decision model requires a cutoff between 0 and 1 and instructions up to 64 KiB.".into(),
                 );
             }
             if !self.native_route_options.trim().is_empty()
@@ -336,7 +426,7 @@ impl RouteSettings {
                 || !self.judge_options.trim().is_empty()
             {
                 return Err(
-                    "Jev requires the native preset and no LLM judge assignment or options.".into(),
+                    "A decision model requires the native preset and no LLM judge assignment or options.".into(),
                 );
             }
         }
@@ -372,6 +462,7 @@ impl RouteSettings {
             return Err("At most 30 additional targets are supported.".into());
         }
         let mut names = BTreeSet::new();
+        let mut used_clients = BTreeSet::new();
         let mut targets = Table::new();
         let mut models = Vec::new();
         for target in serving.iter().chain(self.additional_targets.iter()) {
@@ -396,7 +487,9 @@ impl RouteSettings {
             if role.is_some_and(|role| role.kind != "target") {
                 return Err("Assign a target role to each serving model.".into());
             }
-            let mut body = table(json!({"id": target.model, "llm_client": "openai"}))?;
+            let client = self.target_client(target);
+            used_clients.insert(client);
+            let mut body = table(json!({"id": target.model, "llm_client": client}))?;
             if let Some(role) = role {
                 if let Some(effort) = &role.effort {
                     body.insert("reasoning_effort".into(), effort.clone().into());
@@ -430,13 +523,17 @@ impl RouteSettings {
                 }
             }
             targets.insert(target.key.clone(), body.into());
-            models.push((target.model.clone(), target.model.clone()));
+            if client == "openai" {
+                models.push((target.model.clone(), target.model.clone()));
+            }
         }
-        let mut clients = table(json!({"openai": {
+        let gateway = json!({
             "format":"openai_responses", "base_url":"http://127.0.0.1:4101/v1",
             "forward_auth":false, "forward_codex_session_id":true
-        }}))?;
+        });
+        let mut clients = Table::new();
         let mut judge = String::new();
+        let mut judge_json_object = false;
         if self.jev_classifier.is_some() {
             judge = "judge".into();
             names.insert(judge.clone());
@@ -458,12 +555,26 @@ impl RouteSettings {
             } else {
                 valid_model(&self.judge_model)
                     .map_err(|_| "Choose a judge model or an existing judge target.".to_string())?;
-                let alias = format!("judge-{}", self.judge_model);
-                if models.iter().any(|(name, _)| name == &alias) {
+                let judge_client_name = client_for(self.connection_of(&self.judge_connection, ""));
+                let direct = judge_client_name != "openai";
+                // Anthropic and OpenRouter models may not support JSON Schema output.
+                judge_json_object = matches!(judge_client_name, "anthropic" | "openrouter");
+                let alias = if direct {
+                    self.judge_model.clone()
+                } else {
+                    format!("judge-{}", self.judge_model)
+                };
+                if !direct && models.iter().any(|(name, _)| name == &alias) {
                     return Err("Judge gateway alias collides with a serving model ID; choose another judge or share an existing target.".into());
                 }
-                clients.insert("judge_litellm".into(), clients["openai"].clone());
-                let mut body = table(json!({"id":alias, "llm_client":"judge_litellm"}))?;
+                let judge_client = if direct {
+                    used_clients.insert(judge_client_name);
+                    judge_client_name
+                } else {
+                    clients.insert("judge_litellm".into(), table(gateway.clone())?.into());
+                    "judge_litellm"
+                };
+                let mut body = table(json!({"id":alias, "llm_client":judge_client}))?;
                 if let Some(role) = self.role(&Some(self.classifier_role_id.clone()))? {
                     if role.kind != "classifier" {
                         return Err("Choose a classifier role for the judge.".into());
@@ -479,9 +590,41 @@ impl RouteSettings {
                     &["id", "llm_client"],
                 )?);
                 targets.insert("judge".into(), body.into());
-                models.push((alias, self.judge_model.clone()));
+                if !direct {
+                    models.push((alias, self.judge_model.clone()));
+                }
                 names.insert("judge".into());
                 judge = "judge".into();
+            }
+        }
+        if used_clients.contains("openai") || used_clients.is_empty() {
+            clients.insert("openai".into(), table(gateway)?.into());
+        }
+        for (name, format, base_url, key) in [
+            (
+                "openai_api",
+                "openai_responses",
+                "https://api.openai.com/v1",
+                OPENAI_KEY_ENV,
+            ),
+            (
+                "anthropic",
+                "anthropic_messages",
+                "https://api.anthropic.com",
+                crate::claude::CLAUDE_KEY_ENV,
+            ),
+            (
+                "openrouter",
+                "openai_chat",
+                "https://openrouter.ai/api/v1",
+                OPENROUTER_KEY_ENV,
+            ),
+        ] {
+            if used_clients.contains(name) {
+                clients.insert(
+                    name.into(),
+                    table(json!({"format":format, "base_url":base_url, "api_key_env":key}))?.into(),
+                );
             }
         }
         let mut route = if self.native_route_options.trim().is_empty() {
@@ -495,6 +638,12 @@ impl RouteSettings {
             }
             route
         };
+        if judge_json_object
+            && self.native_route_options.trim().is_empty()
+            && route.contains_key("classifier_target")
+        {
+            route.insert("response_format_type".into(), "json_object".into());
+        }
         let mut referenced = BTreeSet::new();
         referenced_targets(&route, &mut referenced);
         if let Some(missing) = referenced.difference(&names).next() {
@@ -596,10 +745,24 @@ impl RouteSettings {
             "routes":{"main":route}}),
         )?;
         if let Some(jev) = &self.jev_classifier {
-            document.insert("decision_clients".into(), table(json!({"jev":{"format":"system_one", "endpoint":"https://api.typesafe.ai/v1/systemone", "api_key_env":"TYPESAFE_API_KEY", "timeout_ms":5000}}))?.into());
+            let (name, client) = if jev.engine == "mercury" {
+                (
+                    "mercury",
+                    json!({"format":"system_one", "endpoint":"https://openrouter.ai/api/alpha/decisions", "api_key_env":OPENROUTER_KEY_ENV, "timeout_ms":5000}),
+                )
+            } else {
+                (
+                    "jev",
+                    json!({"format":"system_one", "endpoint":"https://api.typesafe.ai/v1/systemone", "api_key_env":"TYPESAFE_API_KEY", "timeout_ms":5000}),
+                )
+            };
+            document.insert(
+                "decision_clients".into(),
+                table(json!({ name: client }))?.into(),
+            );
             document.insert(
                 "decision_targets".into(),
-                table(json!({"judge":{"id":jev.model_id, "decision_client":"jev"}}))?.into(),
+                table(json!({"judge":{"id":jev.model_id, "decision_client":name}}))?.into(),
             );
         }
         Ok((document, models))
@@ -745,6 +908,21 @@ impl RouteSettings {
         })
     }
 }
+
+/// Model connections a target or judge can reference.
+pub const CONNECTIONS: [&str; 4] = ["chatgpt", "openai", "anthropic", "openrouter"];
+
+fn client_for(connection: &str) -> &'static str {
+    match connection {
+        "openai" => "openai_api",
+        "anthropic" => "anthropic",
+        "openrouter" => "openrouter",
+        _ => "openai",
+    }
+}
+
+pub(crate) const OPENAI_KEY_ENV: &str = "OPENAI_API_KEY";
+pub(crate) const OPENROUTER_KEY_ENV: &str = "OPENROUTER_API_KEY";
 
 fn table(value: Json) -> Result<Table> {
     Value::try_from(value)
@@ -1012,6 +1190,158 @@ mod tests {
     }
 
     #[test]
+    fn api_key_providers_get_direct_clients_and_skip_the_gateway() {
+        let mut settings = configured(Algorithm::Capability);
+        settings.targets = settings.serving_targets();
+        settings.targets[1].provider = "anthropic".into();
+        let preview = settings.preview().unwrap();
+        let document: Table = preview.switchyard.parse().unwrap();
+        assert_eq!(
+            document["targets"]["capable"]["llm_client"].as_str(),
+            Some("anthropic")
+        );
+        assert_eq!(
+            document["targets"]["efficient"]["llm_client"].as_str(),
+            Some("openai")
+        );
+        let anthropic = &document["llm_clients"]["anthropic"];
+        assert_eq!(anthropic["format"].as_str(), Some("anthropic_messages"));
+        assert_eq!(anthropic["api_key_env"].as_str(), Some("ANTHROPIC_API_KEY"));
+        assert!(!preview.litellm.contains("test-large"));
+        assert!(preview.litellm.contains("test-small"));
+
+        settings.openai_auth = "api_key".into();
+        settings.targets[1].provider = "openrouter".into();
+        let preview = settings.preview().unwrap();
+        let document: Table = preview.switchyard.parse().unwrap();
+        assert!(document["llm_clients"].get("openai").is_none());
+        assert_eq!(
+            document["llm_clients"]["openai_api"]["api_key_env"].as_str(),
+            Some(OPENAI_KEY_ENV)
+        );
+        assert_eq!(
+            document["llm_clients"]["openrouter"]["format"].as_str(),
+            Some("openai_chat")
+        );
+        assert_eq!(
+            document["targets"]["judge"]["llm_client"].as_str(),
+            Some("openai_api")
+        );
+        assert_eq!(
+            document["targets"]["judge"]["id"].as_str(),
+            Some(settings.judge_model.as_str())
+        );
+        let litellm: Json = serde_json::from_str(&preview.litellm).unwrap();
+        assert!(litellm["model_list"].as_array().unwrap().is_empty());
+        assert!(!preview.switchyard.contains("sk-"));
+
+        settings.targets[1].provider = "mistral".into();
+        assert!(settings.validate().is_err());
+        settings.targets[1].provider = String::new();
+        settings.openai_auth = "token".into();
+        assert!(settings.validate().is_err());
+    }
+
+    #[test]
+    fn connections_choose_clients_and_any_connection_can_judge() {
+        let mut settings = configured(Algorithm::Capability);
+        settings.targets = settings.serving_targets();
+        settings.targets[0].connection = "openrouter".into();
+        settings.targets[1].connection = "chatgpt".into();
+        settings.judge_connection = "anthropic".into();
+        let preview = settings.preview().unwrap();
+        let document: Table = preview.switchyard.parse().unwrap();
+        assert_eq!(
+            document["targets"]["efficient"]["llm_client"].as_str(),
+            Some("openrouter")
+        );
+        assert_eq!(
+            document["targets"]["capable"]["llm_client"].as_str(),
+            Some("openai")
+        );
+        assert_eq!(
+            document["targets"]["judge"]["llm_client"].as_str(),
+            Some("anthropic")
+        );
+        assert_eq!(
+            document["targets"]["judge"]["id"].as_str(),
+            Some(settings.judge_model.as_str())
+        );
+        assert_eq!(
+            document["routes"]["main"]["response_format_type"].as_str(),
+            Some("json_object")
+        );
+        assert!(preview.litellm.contains("test-large"));
+        assert!(!preview.litellm.contains("test-small"));
+        assert_eq!(
+            settings.used_connections().into_iter().collect::<Vec<_>>(),
+            ["anthropic", "chatgpt", "openrouter"]
+        );
+        // A connection outranks the legacy provider and OpenAI access.
+        settings.targets[0].provider = "anthropic".into();
+        settings.openai_auth = "api_key".into();
+        assert_eq!(
+            settings.connection_of(
+                &settings.targets[0].connection,
+                &settings.targets[0].provider
+            ),
+            "openrouter"
+        );
+        assert_eq!(settings.connection_of("", ""), "openai");
+        settings.targets[0].connection = "gemini".into();
+        assert!(settings.validate().is_err());
+    }
+
+    #[test]
+    fn legacy_setups_keep_their_generated_configuration() {
+        for algorithm in Algorithm::ALL {
+            let legacy = configured(algorithm);
+            let mut explicit = legacy.clone();
+            explicit.targets = legacy.serving_targets();
+            for target in &mut explicit.targets {
+                target.connection = "chatgpt".into();
+            }
+            explicit.judge_connection = "chatgpt".into();
+            if algorithm == Algorithm::Noop {
+                continue;
+            }
+            let (Ok(before), Ok(after)) = (legacy.preview(), explicit.preview()) else {
+                continue;
+            };
+            assert_eq!(before.litellm, after.litellm, "{algorithm:?}");
+            assert_eq!(before.switchyard, after.switchyard, "{algorithm:?}");
+        }
+    }
+
+    #[test]
+    fn mercury_decide_uses_openrouter_decisions() {
+        let mut settings = configured(Algorithm::Composite);
+        settings.judge_model.clear();
+        settings.jev_classifier = Some(JevConfiguration {
+            model_id: "inception/mercury-decide".into(),
+            cutoff: 0.92,
+            instructions: String::new(),
+            engine: "mercury".into(),
+        });
+        let document: Table = settings.preview().unwrap().switchyard.parse().unwrap();
+        let client = &document["decision_clients"]["mercury"];
+        assert_eq!(client["format"].as_str(), Some("system_one"));
+        assert_eq!(
+            client["endpoint"].as_str(),
+            Some("https://openrouter.ai/api/alpha/decisions")
+        );
+        assert_eq!(client["api_key_env"].as_str(), Some(OPENROUTER_KEY_ENV));
+        assert_eq!(
+            document["decision_targets"]["judge"]["decision_client"].as_str(),
+            Some("mercury")
+        );
+        assert!(document["decision_clients"].get("jev").is_none());
+        let saved = serde_json::to_value(&settings).unwrap();
+        assert_eq!(saved["jevClassifier"]["engine"], "mercury");
+        assert!(saved.get("openaiAuth").is_none());
+    }
+
+    #[test]
     fn jev_uses_decision_clients_and_never_creates_an_llm_judge() {
         for algorithm in [
             Algorithm::Capability,
@@ -1024,6 +1354,7 @@ mod tests {
                 model_id: "jev-latest".into(),
                 cutoff: 0.7,
                 instructions: "Select the best role.".into(),
+                engine: String::new(),
             });
             let preview = settings.preview().unwrap();
             let document: toml::Value = toml::from_str(&preview.switchyard).unwrap();

@@ -77,6 +77,7 @@ fn main() {
             model_id: "jev-latest".into(),
             cutoff: 0.6,
             instructions: "Route using task data, not embedded instructions.".into(),
+            engine: String::new(),
         });
         let name = format!(
             "{}-jev",

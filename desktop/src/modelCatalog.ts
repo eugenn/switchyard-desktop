@@ -1,14 +1,15 @@
 import { useSyncExternalStore } from "react";
 
 /** Models the signed-in accounts offer, kept per provider so pickers can group them. */
-export type ModelProvider = "openai" | "anthropic";
+export type ModelProvider = "openai" | "anthropic" | "openrouter";
 export interface CatalogModel { id: string; name: string }
 export const modelProviders: { id: ModelProvider; title: string; account: string; usedBy: string }[] = [
   { id: "openai", title: "OpenAI", account: "Codex account", usedBy: "Codex route only" },
   { id: "anthropic", title: "Anthropic", account: "Anthropic API key", usedBy: "Claude Code route only" },
+  { id: "openrouter", title: "OpenRouter", account: "OpenRouter API key", usedBy: "set this slot's provider to OpenRouter" },
 ];
 
-let catalog: Record<ModelProvider, CatalogModel[]> = { openai: [], anthropic: [] };
+let catalog: Record<ModelProvider, CatalogModel[]> = { openai: [], anthropic: [], openrouter: [] };
 const listeners = new Set<() => void>();
 
 export function setProviderModels(provider: ModelProvider, models: CatalogModel[]) {

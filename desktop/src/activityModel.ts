@@ -1,5 +1,5 @@
 // Activity data model: pure functions over routing-log records and server stats.
-import { builtInRoles, servingTargets, type RouteSettings } from "./api";
+import { builtInRoles, servingTargets, type ClaudeSettings, type RouteSettings } from "./api";
 
 type Raw = Record<string, unknown>;
 
@@ -213,6 +213,30 @@ export function profile(settings: RouteSettings): Profile {
   const classifierModelID = settings.jevClassifier?.modelID || settings.judgeModel?.trim() || shared || null;
   return { assignments, roles: flowRoles, targetNames, configured, usesClassifier, classifierModelID };
 }
+/** Matches CLAUDE_ROUTE_ID and the target keys desktop/core/src/claude.rs generates. */
+export const claudeRouteID = "switchyard-claude";
+const claudeTargets = [
+  { key: "claude_efficient", name: "Efficient", rank: 0, model: (claude: ClaudeSettings) => claude.efficientModel },
+  { key: "claude_capable", name: "Capable", rank: 1, model: (claude: ClaudeSettings) => claude.capableModel },
+];
+export const isClaudeRecord = (record: LogRecord) => record.route ? record.route === claudeRouteID : record.origin === "claude-code";
+/** The Claude Code route: an efficient and a capable target, picked by a classifier that runs on the efficient model. */
+export function claudeProfile(claude: ClaudeSettings | null): Profile {
+  const assignments = new Map<string, string>();
+  const roles = new Map<string, FlowRole>();
+  const targetNames = new Map<string, string>();
+  const configured: string[] = [];
+  for (const target of claudeTargets) {
+    targetNames.set(target.key, target.name);
+    const model = claude ? target.model(claude).trim() : "";
+    if (!model) continue;
+    if (!configured.includes(model)) configured.push(model);
+    assignments.set(model, target.name);
+    const existing = roles.get(model);
+    if (!existing || existing.rank < target.rank) roles.set(model, { name: target.name, effort: null, rank: target.rank });
+  }
+  return { assignments, roles, targetNames, configured, usesClassifier: true, classifierModelID: claude?.efficientModel.trim() || null };
+}
 export function roleFor(record: LogRecord, profileValue: Profile): string | null {
   if (record.isClassifier) return "classifier";
   if (record.tier) return profileValue.targetNames.get(record.tier) ?? record.tier;
@@ -313,7 +337,8 @@ export function ticks(records: LogRecord[], sessionID: string | null, start: num
   return new Map([...placed].map(([model, list]) => [model, list.sort((a, b) => a.position - b.position).map((item) => ({ position: item.position, weight: Math.sqrt(item.total / heaviest) }))]));
 }
 export interface ContextUsage { inputTokens: number | null; contextWindow: number | null; fraction: number | null }
-export function contextUsage(records: LogRecord[], sessionID: string, settings: RouteSettings, table: PriceTable | null = null): Map<string, ContextUsage> {
+type ContextSettings = Pick<RouteSettings, "discoveredModels" | "contextWindow" | "allowsLongContext">;
+export function contextUsage(records: LogRecord[], sessionID: string, settings: ContextSettings, table: PriceTable | null = null): Map<string, ContextUsage> {
   const newest = new Map<string, LogRecord>();
   for (const record of records) {
     if (record.isClassifier || record.sessionID !== sessionID) continue;
@@ -329,7 +354,7 @@ export function contextUsage(records: LogRecord[], sessionID: string, settings: 
 
 const validWindow = (value: unknown): number | null => typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null;
 /** Account metadata wins over public defaults; explicit route limits still cap the meter. */
-export function contextWindowFor(model: string, settings: RouteSettings, table: PriceTable | null): number | null {
+export function contextWindowFor(model: string, settings: ContextSettings, table: PriceTable | null): number | null {
   let window = validWindow(settings.discoveredModels?.find((entry) => entry.id === model)?.contextWindow);
   if (window == null && table) {
     for (const candidate of modelCandidates(model)) {

@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeSet,
     net::TcpListener,
     process::Command,
     time::{Duration, Instant},
@@ -13,6 +14,8 @@ use crate::{
     auth::LoginAttempt,
     claude::CLAUDE_KEY_ENV,
     codex_profile::CodexProfile,
+    config::{OPENAI_KEY_ENV, OPENROUTER_KEY_ENV},
+    connections::{self, ConnectionView, PROVIDER_CONNECTIONS},
     process::{OwnedProcess, python_command},
 };
 
@@ -78,11 +81,99 @@ impl DesktopSession {
     }
 
     pub fn set_anthropic_key(&self, key: &str) -> Result<()> {
-        self.credentials.set_anthropic_key(key)
+        self.save_connection_key("anthropic", key)
     }
 
     pub fn has_anthropic_key(&self) -> Result<bool> {
         self.credentials.has_anthropic_key()
+    }
+
+    pub fn set_provider_key(&self, provider: &str, key: &str) -> Result<()> {
+        self.save_connection_key(provider, key)
+    }
+
+    /// Every provider connection, with whether it can serve models right now.
+    pub fn connections(&self) -> Result<Vec<ConnectionView>> {
+        let mut records = connections::load(&self.locations)?;
+        PROVIDER_CONNECTIONS
+            .iter()
+            .map(|id| {
+                let connected = match *id {
+                    "chatgpt" => self.has_auth_record(),
+                    "typesafe" => self.credentials.has_typesafe_key()?,
+                    "anthropic" => self.credentials.has_anthropic_key()?,
+                    other => self.credentials.has_provider_key(other)?,
+                };
+                Ok(ConnectionView {
+                    id: (*id).to_owned(),
+                    connected,
+                    record: records.remove(*id).unwrap_or_default(),
+                })
+            })
+            .collect()
+    }
+
+    /// Saves or removes a connection's API key and records its hint. Removing a
+    /// key also forgets the cached model list.
+    pub fn save_connection_key(&self, connection: &str, key: &str) -> Result<()> {
+        match connection {
+            "typesafe" => self.credentials.set_typesafe_key(key)?,
+            "anthropic" => self.credentials.set_anthropic_key(key)?,
+            "openai" | "openrouter" => self.credentials.set_provider_key(connection, key)?,
+            _ => return Err("This connection does not use an API key.".into()),
+        }
+        let mut records = connections::load(&self.locations)?;
+        if key.is_empty() {
+            records.remove(connection);
+        } else {
+            let record = records.entry(connection.to_owned()).or_default();
+            record.key_hint = connections::key_hint(key);
+            record.error.clear();
+        }
+        connections::save(&self.locations, &records)
+    }
+
+    /// What a connection check needs, so the network call can run without holding the session.
+    pub fn connection_request(&self, connection: &str) -> Result<(reqwest::Client, String)> {
+        let key = match connection {
+            "anthropic" => self.credentials.anthropic_key()?,
+            "openai" => self.credentials.openai_key()?,
+            "openrouter" => self.credentials.openrouter_key()?,
+            _ => return Err("This connection has no model list to check.".into()),
+        }
+        .ok_or("Save an API key for this connection first.")?;
+        Ok((self.client.clone(), key))
+    }
+
+    /// Caches a connection check's outcome and returns the updated connection.
+    pub fn record_refresh(
+        &self,
+        connection: &str,
+        outcome: Result<(Vec<crate::AvailableModel>, u64)>,
+    ) -> Result<ConnectionView> {
+        let mut records = connections::load(&self.locations)?;
+        let record = records.entry(connection.to_owned()).or_default();
+        record.checked_at = Some(connections::now());
+        match outcome {
+            Ok((models, latency)) => {
+                record.models = models;
+                record.refreshed_at = record.checked_at;
+                record.latency_ms = Some(latency);
+                record.error.clear();
+            }
+            Err(error) => record.error = error,
+        }
+        let record = record.clone();
+        connections::save(&self.locations, &records)?;
+        Ok(ConnectionView {
+            id: connection.to_owned(),
+            connected: true,
+            record,
+        })
+    }
+
+    pub fn has_provider_key(&self, provider: &str) -> Result<bool> {
+        self.credentials.has_provider_key(provider)
     }
 
     pub fn begin_login(&mut self) -> Result<LoginStatus> {
@@ -197,13 +288,45 @@ impl DesktopSession {
 
     async fn start_inner(&mut self, settings: &RouteSettings) -> Result<()> {
         let preview = settings.preview()?;
-        let key = if settings.jev_classifier.is_some() {
-            Some(self.credentials.typesafe_key()?.ok_or(
-                "Save the TypeSafe API key in the system credential vault before starting Jev.",
-            )?)
-        } else {
-            None
-        };
+        let generated: toml::Table = preview
+            .switchyard
+            .parse()
+            .map_err(|_| "The generated configuration could not be read back.")?;
+        // Every key the generated clients name, read from the vault only when used.
+        let wanted: BTreeSet<String> = ["llm_clients", "decision_clients"]
+            .iter()
+            .filter_map(|section| generated.get(*section).and_then(toml::Value::as_table))
+            .flat_map(|clients| clients.values())
+            .filter_map(|client| client.get("api_key_env").and_then(toml::Value::as_str))
+            .map(str::to_owned)
+            .collect();
+        let mut keys: Vec<(String, String)> = Vec::new();
+        for env in &wanted {
+            let (key, missing) = match env.as_str() {
+                "TYPESAFE_API_KEY" => (
+                    self.credentials.typesafe_key()?,
+                    "Save the TypeSafe API key in the system credential vault before starting Jev.",
+                ),
+                OPENAI_KEY_ENV => (
+                    self.credentials.openai_key()?,
+                    "Save an OpenAI API key in Connections, or switch OpenAI access to the ChatGPT subscription.",
+                ),
+                OPENROUTER_KEY_ENV => (
+                    self.credentials.openrouter_key()?,
+                    "Save an OpenRouter API key in Connections before starting OpenRouter targets or Mercury Decide.",
+                ),
+                CLAUDE_KEY_ENV => (
+                    self.credentials.anthropic_key()?,
+                    "Save an Anthropic API key in Connections before starting Anthropic targets.",
+                ),
+                _ => {
+                    return Err(format!(
+                        "Unknown credential {env} in the generated configuration."
+                    ));
+                }
+            };
+            keys.push((env.clone(), key.ok_or(missing)?));
+        }
         // The Claude Code route is optional and never blocks Codex. It is served by this
         // same server only when both Claude models and an Anthropic key are saved; a
         // setup without a key just leaves the route off and says so.
@@ -235,7 +358,16 @@ impl DesktopSession {
         if self.login.is_some() {
             return Err("Finish or cancel sign-in before starting routing.".into());
         }
-        let needs_gateway = settings.algorithm != Algorithm::Noop;
+        // LiteLLM serves the ChatGPT subscription; API-key providers go direct.
+        let needs_gateway = settings.algorithm != Algorithm::Noop
+            && serde_json::from_str::<Value>(&preview.litellm)
+                .ok()
+                .and_then(|litellm| {
+                    litellm["model_list"]
+                        .as_array()
+                        .map(|list| !list.is_empty())
+                })
+                .unwrap_or(true);
         if needs_gateway && !self.has_auth_record() {
             return Err("Sign in with ChatGPT before starting routing.".into());
         }
@@ -262,8 +394,8 @@ impl DesktopSession {
             .arg("--config")
             .arg(self.locations.root().join("routes.toml"))
             .arg("--dry-run");
-        if let Some(key) = &key {
-            validation.env("TYPESAFE_API_KEY", key);
+        for (env, key) in &keys {
+            validation.env(env, key);
         }
         if let Some(key) = &claude_key {
             validation.env(CLAUDE_KEY_ENV, key);
@@ -299,8 +431,8 @@ impl DesktopSession {
             .arg(self.router_port.to_string())
             .arg("--routing-log-file")
             .arg(self.locations.root().join("routing-log.jsonl"));
-        if let Some(key) = &key {
-            command.env("TYPESAFE_API_KEY", key);
+        for (env, key) in &keys {
+            command.env(env, key);
         }
         if let Some(key) = &claude_key {
             command.env(CLAUDE_KEY_ENV, key);
@@ -503,6 +635,84 @@ mod tests {
         assert!(!error.contains("Anthropic"), "{error}");
         assert!(!locations.root().join("routes.toml").exists());
         assert!(!session.status().running);
+    }
+
+    #[test]
+    fn connections_report_keys_by_hint_and_forget_removed_keys() {
+        let directory = tempfile::tempdir().unwrap();
+        let locations = UserDataLocations::injected(directory.path().join("app"));
+        let session = DesktopSession::new(
+            locations.clone(),
+            RuntimeLayout::bundled(directory.path().join("missing-runtime")),
+        )
+        .unwrap();
+        let list = session.connections().unwrap();
+        assert_eq!(
+            list.iter().map(|item| item.id.as_str()).collect::<Vec<_>>(),
+            PROVIDER_CONNECTIONS
+        );
+        assert!(list.iter().all(|item| !item.connected));
+        session
+            .save_connection_key("anthropic", "test-not-a-key-9876")
+            .unwrap();
+        session
+            .set_provider_key("openrouter", "test-not-a-key-5555")
+            .unwrap();
+        let list = session.connections().unwrap();
+        let anthropic = list.iter().find(|item| item.id == "anthropic").unwrap();
+        assert!(anthropic.connected && anthropic.record.key_hint == "9876");
+        assert!(session.has_anthropic_key().unwrap());
+        assert!(
+            !std::fs::read_to_string(locations.root().join("connections.json"))
+                .unwrap()
+                .contains("not-a-key")
+        );
+        session.save_connection_key("openrouter", "").unwrap();
+        let list = session.connections().unwrap();
+        assert!(
+            !list
+                .iter()
+                .find(|item| item.id == "openrouter")
+                .unwrap()
+                .connected
+        );
+        assert!(session.save_connection_key("chatgpt", "x").is_err());
+    }
+
+    #[tokio::test]
+    async fn api_key_providers_need_their_saved_keys_to_start() {
+        let directory = tempfile::tempdir().unwrap();
+        let locations = UserDataLocations::injected(directory.path().join("app"));
+        let mut session = DesktopSession::new(
+            locations.clone(),
+            RuntimeLayout::bundled(directory.path().join("missing-runtime")),
+        )
+        .unwrap();
+        let mut settings = RouteSettings {
+            algorithm: Algorithm::Passthrough,
+            efficient_model: "claude-test".into(),
+            ..Default::default()
+        };
+        settings.targets = vec![crate::ModelTarget {
+            key: "efficient".into(),
+            model: "claude-test".into(),
+            provider: "anthropic".into(),
+            ..Default::default()
+        }];
+        let error = session.start(&settings).await.unwrap_err();
+        assert!(error.contains("Anthropic API key"), "{error}");
+        settings.targets[0].provider = "openrouter".into();
+        let error = session.start(&settings).await.unwrap_err();
+        assert!(error.contains("OpenRouter API key"), "{error}");
+        session
+            .set_provider_key("openrouter", "test-not-a-key")
+            .unwrap();
+        assert!(session.has_provider_key("openrouter").unwrap());
+        // With the key saved, start gets past credentials to the runtime check.
+        let error = session.start(&settings).await.unwrap_err();
+        assert!(error.contains("Bundled runtime is not ready"), "{error}");
+        assert!(session.set_provider_key("mistral", "x").is_err());
+        assert!(!locations.root().join("routes.toml").exists());
     }
 
     #[tokio::test]

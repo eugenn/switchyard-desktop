@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { callCost, computeMetrics, contextUsage, contextWindowFor, dollars, droppingHousekeepingThreads, durationText, estimateCost, priceFor, lanes, parseRecord, parseRecords, parseStats, profile, sessions, ticks } from "./activityModel";
+import { callCost, claudeProfile, computeMetrics, isClaudeRecord, contextUsage, contextWindowFor, dollars, droppingHousekeepingThreads, durationText, estimateCost, priceFor, lanes, parseRecord, parseRecords, parseStats, profile, sessions, ticks } from "./activityModel";
 import type { RouteSettings } from "./api";
 
 const at = (minute: number) => new Date(Date.UTC(2026, 10, 7, 13, minute)).toISOString();
@@ -138,5 +138,22 @@ describe("cost at API list prices", () => {
     const records = parseRecords([{ model: "judge-gpt-x", tier: "classifier", prompt_tokens: 1000 }]);
     expect(estimateCost(records, table, { "judge-gpt-x": "gpt-x" })).toMatchObject({ pricedCalls: 1, unpricedCalls: 0, dollars: 0.001 });
     expect(estimateCost(records, table).unpricedModels).toEqual(["judge-gpt-x"]);
+  });
+});
+
+describe("claude route profile", () => {
+  it("names the Claude targets and keeps Codex records off the Claude route", () => {
+    const flow = claudeProfile({ efficientModel: "claude-sonnet-5-5", capableModel: "claude-opus-5-5" });
+    expect(flow.configured).toEqual(["claude-sonnet-5-5", "claude-opus-5-5"]);
+    expect(flow.classifierModelID).toBe("claude-sonnet-5-5");
+    const [served, judged, codex] = parseRecords([
+      { route_id: "switchyard-claude", origin: "claude-code", model: "claude-sonnet-5-5", target: "claude_efficient", tier: "", session_id: "c", ts: at(1) },
+      { route_id: "switchyard-claude", origin: "claude-code", model: "claude-sonnet-5-5", target: "claude_efficient", tier: "classifier", session_id: "c", ts: at(1) },
+      { route_id: "switchyard-desktop", origin: "codex-cli", model: "gpt-x", target: "standard", session_id: "x", ts: at(1) },
+    ]);
+    expect([served, judged, codex].map(isClaudeRecord)).toEqual([true, true, false]);
+    const metrics = computeMetrics([served, judged], Date.parse(at(2)), null, flow.assignments);
+    expect(lanes(metrics, flow.roles).map((lane) => [flow.roles.get(lane.id)?.name, lane.count])).toEqual([["Capable", 0], ["Efficient", 1]]);
+    expect(metrics.classifierCount).toBe(1);
   });
 });
