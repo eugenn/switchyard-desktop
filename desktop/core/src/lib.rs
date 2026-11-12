@@ -2,6 +2,7 @@ mod auth;
 mod claude;
 mod codex_profile;
 mod config;
+mod connections;
 mod credentials;
 mod discovery;
 mod history;
@@ -18,6 +19,7 @@ pub use config::{
     Algorithm, ConfigurationPreview, JevConfiguration, ModelTarget, RoleGroup, RouteSettings,
     RoutingRole, built_in_roles,
 };
+pub use connections::{ConnectionRecord, ConnectionView, PROVIDER_CONNECTIONS, fetch_models};
 pub use credentials::CredentialVault;
 pub use discovery::{AvailableModel, discover_models};
 pub use locations::UserDataLocations;

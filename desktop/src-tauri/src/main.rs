@@ -1,7 +1,7 @@
 use serde::Serialize;
 use switchyard_desktop_core::{
-    ClaudeSettings, ConfigurationPreview, DesktopSession, LoginStatus, RouteSettings,
-    RuntimeLayout, RuntimeStatus, SessionStatus, UserDataLocations,
+    ClaudeSettings, ConfigurationPreview, ConnectionView, DesktopSession, LoginStatus,
+    RouteSettings, RuntimeLayout, RuntimeStatus, SessionStatus, UserDataLocations,
 };
 use tauri::{Manager, State};
 use tokio::sync::Mutex;
@@ -99,6 +99,55 @@ async fn stop_routing(state: State<'_, DesktopState>) -> Result<SessionStatus, S
 #[tauri::command]
 async fn session_status(state: State<'_, DesktopState>) -> Result<SessionStatus, String> {
     Ok(state.session.lock().await.status())
+}
+
+#[tauri::command]
+async fn connections(state: State<'_, DesktopState>) -> Result<Vec<ConnectionView>, String> {
+    state.session.lock().await.connections()
+}
+
+#[tauri::command]
+async fn save_connection_key(
+    connection: String,
+    key: String,
+    state: State<'_, DesktopState>,
+) -> Result<(), String> {
+    state
+        .session
+        .lock()
+        .await
+        .save_connection_key(&connection, &key)
+}
+
+#[tauri::command]
+async fn refresh_connection(
+    connection: String,
+    state: State<'_, DesktopState>,
+) -> Result<ConnectionView, String> {
+    let (client, key) = state.session.lock().await.connection_request(&connection)?;
+    let outcome = switchyard_desktop_core::fetch_models(&client, &connection, &key).await;
+    state
+        .session
+        .lock()
+        .await
+        .record_refresh(&connection, outcome)
+}
+
+#[tauri::command]
+async fn provider_key_status(
+    provider: String,
+    state: State<'_, DesktopState>,
+) -> Result<bool, String> {
+    state.session.lock().await.has_provider_key(&provider)
+}
+
+#[tauri::command]
+async fn save_provider_key(
+    provider: String,
+    key: String,
+    state: State<'_, DesktopState>,
+) -> Result<(), String> {
+    state.session.lock().await.set_provider_key(&provider, &key)
 }
 
 #[tauri::command]
@@ -208,6 +257,11 @@ fn main() {
             import_setup,
             discover_models,
             typesafe_key_status,
+            provider_key_status,
+            connections,
+            save_connection_key,
+            refresh_connection,
+            save_provider_key,
             save_typesafe_key,
             begin_login,
             login_status,

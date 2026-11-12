@@ -242,6 +242,8 @@ impl RouteSettings {
                 model: tier.model_id,
                 role_id,
                 native_options: tier.native_options,
+                provider: String::new(),
+                connection: String::new(),
             }
         };
         let mut targets = profile

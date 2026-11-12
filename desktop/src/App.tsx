@@ -1,15 +1,19 @@
 import { useEffect, useRef, useState } from "react";
-import { algorithms, api, builtInRoles, emptySettings, native, stopped, validationMessage, type Algorithm, type ConfigurationPreview, type LoginStatus, type RouteSettings, type RuntimeStatus, type Stats } from "./api";
+import { algorithms, api, builtInRoles, connectionInfo, connectionOf, emptySettings, native, servingTargets, stopped, usedConnections, validationMessage, type Algorithm, type Connection, type ConnectionId, type KeyedConnection, type ConfigurationPreview, type LoginStatus, type RouteSettings, type RuntimeStatus, type Stats } from "./api";
 
-import { ModelDiscovery } from "./ModelDiscovery";
 import { ClaudeIntegration } from "./ClaudeIntegration";
 import { SetupTransfer } from "./SetupTransfer";
 import { RequestHistory } from "./RequestHistory";
 import { Activity } from "./Activity";
 import { RoutingToggle, canAnimate, minimumHold, type RoutingPhase } from "./RoutingToggle";
-import { AdvancedSettings, RolesEditor, RoutingEditor, StrategyPicker, strategyReset } from "./RoutingEditor";
+import { AdvancedSettings, RolesEditor } from "./RoutingEditor";
+import { RouteCanvas, StrategyDeck, morph, strategyReset } from "./RouteCanvas";
+import { ConnectionStrip, ProvidersPage } from "./ProvidersPage";
+import { ConnectionsContext, type Catalog } from "./ConnectionPicker";
+import { connectionUsage } from "./RouteCanvas";
 
-type Page = "activity" | "requests" | "routing" | "roles";
+type Page = "providers" | "activity" | "requests" | "routing" | "roles";
+const migrationNoted = "switchyard.connections-migration-noted";
 
 export function App() {
   const [page, setPage] = useState<Page>("routing");
@@ -33,6 +37,15 @@ export function App() {
   const operation = useRef(false);
   const previewDialog = useRef<HTMLDialogElement>(null);
   const invalid = validationMessage(settings);
+  const [connections, setConnections] = useState<Connection[]>([]);
+  const [highlight, setHighlight] = useState<ConnectionId | "typesafe" | null>(null);
+  const [noted, setNoted] = useState(() => { try { return localStorage.getItem(migrationNoted) === "1"; } catch { return false; } });
+  const connected = new Set<ConnectionId | "typesafe">([...(login.signedIn ? ["chatgpt" as const] : []), ...connections.filter((item) => item.id !== "chatgpt" && item.connected).map((item) => item.id)]);
+  const catalog: Catalog = { chatgpt: (settings.discoveredModels ?? []), ...Object.fromEntries(connections.filter((item) => item.id !== "chatgpt" && item.id !== "typesafe").map((item) => [item.id, item.models])) };
+  const blocked = [...usedConnections(settings)].filter((id) => !connected.has(id));
+  const usage = connectionUsage(settings);
+  const needsSignIn = blocked.includes("chatgpt");
+  const [hoverStrategy, setHoverStrategy] = useState<Algorithm | null>(null);
 
   useEffect(() => {
     if (!native) return;
@@ -40,6 +53,12 @@ export function App() {
     api.bootstrap().then((data) => {
       if (!mounted) return;
       setSettings(data.settings); setPersisted(JSON.stringify(data.settings)); setRuntime(data.runtime); setSession(data.session); setLogin(data.login); setLoaded(true);
+      return api.connections().then((list) => {
+        if (!mounted) return;
+        setConnections(list);
+        // First run: nothing connected yet, so start where models come from.
+        if (!data.login.signedIn && !list.some((item) => item.id !== "typesafe" && item.connected)) setPage("providers");
+      });
     }).catch((reason: unknown) => { if (mounted) setError(String(reason)); });
     return () => { mounted = false; };
   }, []);
@@ -97,7 +116,7 @@ export function App() {
   /** Switching strategy resets strategy-specific inputs, so the previous setup stays one click away. */
   function pickStrategy(value: Algorithm) {
     const previous = settings;
-    change(strategyReset(value));
+    morph(() => change(strategyReset(value, previous)));
     setUndo({ from: algorithms.find((item) => item.value === previous.algorithm)!.label, settings: previous });
   }
 
@@ -137,7 +156,12 @@ export function App() {
   const dirty = loaded && JSON.stringify(settings) !== persisted;
   const savedSettings: RouteSettings | null = persisted ? JSON.parse(persisted) : null;
   const libraryDirty = loaded && JSON.stringify([settings.roles ?? builtInRoles, settings.roleGroups ?? []]) !== JSON.stringify([savedSettings?.roles ?? builtInRoles, savedSettings?.roleGroups ?? []]);
-  const canStart = native && loaded && !session.running && runtime.available && (settings.algorithm === "noop" || login.signedIn) && !login.pending && !invalid;
+  const canStart = native && loaded && !session.running && runtime.available && blocked.length === 0 && !login.pending && !invalid;
+  const saveKey = async (id: KeyedConnection, key: string) => { await api.saveConnectionKey(id, key); setConnections(await api.connections()); };
+  const refreshConnection = async (id: KeyedConnection) => { const updated = await api.refreshConnection(id); setConnections((list) => list.map((item) => item.id === id ? updated : item)); };
+  const blockedText = blocked.map((id) => `${usage[id].join(", ") || "The route"} use${usage[id].length === 1 ? "s" : ""} ${connectionInfo[id].name}, which is not connected.`).join(" ");
+  const legacy = loaded && !noted && settings.algorithm !== "noop" && servingTargets(settings).every((target) => !target.connection);
+  const noteMigration = () => { setNoted(true); try { localStorage.setItem(migrationNoted, "1"); } catch { /* per-viewer convenience only */ } };
   const signIn = () => void perform(async () => setLogin(await api.beginLogin()));
   const showIssue = () => {
     const field = document.querySelector<HTMLElement>(".routing-page [aria-invalid=true]");
@@ -150,7 +174,7 @@ export function App() {
     : !loaded ? { tone: "warn", text: error ? "Saved settings could not be read, so nothing can be saved." : "Reading saved settings…" }
     : !runtime.available ? { tone: "warn", text: "The bundled runtime is not prepared yet." }
     : login.pending ? { tone: "warn", text: "Finish ChatGPT sign-in to start routing." }
-    : settings.algorithm !== "noop" && !login.signedIn ? { tone: "warn", text: "Sign in with ChatGPT to start routing.", action: { label: "Sign in", run: signIn } }
+    : blocked.length ? { tone: "warn", text: blockedText, action: { label: "Connect", run: () => setPage("providers") } }
     : invalid ? { tone: "warn", text: invalid, action: { label: "Show", run: showIssue } }
     : dirty ? { tone: "ok", text: "Ready to start. You have unsaved changes; starting saves them." }
     : { tone: "ok", text: "Ready to start. Settings are saved." };
@@ -164,11 +188,11 @@ export function App() {
   return <div className="app-shell">
     <header className="toolbar">
         <span className="toolbar-brand"><i className={session.running ? "live" : ""} aria-hidden="true" />Switchyard</span>
-        <nav className="pane-switcher" aria-label="Main navigation">{nav("routing", "Routing")}{nav("roles", "Roles")}{nav("activity", "Activity")}{nav("requests", "Requests")}</nav>
+        <nav className="pane-switcher" aria-label="Main navigation">{nav("providers", "Providers")}{nav("routing", "Routing")}{nav("roles", "Roles")}{nav("activity", "Activity")}{nav("requests", "Requests")}</nav>
         <span className="toolbar-spacer" />
         <span className={`toolbar-status${session.running ? " live" : ""}`}>{connection}</span>
         <RoutingToggle phase={routingPhase} onToggle={() => void toggleRouting()}
-          disabled={!native || !loaded || (!session.running && (!runtime.available || (settings.algorithm !== "noop" && !login.signedIn) || login.pending || !!invalid))} />
+          disabled={!native || !loaded || (!session.running && (!runtime.available || blocked.length > 0 || login.pending || !!invalid))} />
       </header>
     <main>
       {!native && <div className="banner preview-banner" role="status"><strong>Browser preview</strong><span>Layout only. Open the Tauri app to save settings or control the bundled services. No simulated metrics.</span></div>}
@@ -179,24 +203,18 @@ export function App() {
       {page === "routing" ? <div className="config-page routing-page" key="routing">
         <section className="config-head">
           <div><h1>Routing</h1>
-            <p className="flow-line" aria-label="Request flow"><span>Codex</span><i aria-hidden="true">→</i><strong>Switchyard · {selected.label}</strong><i aria-hidden="true">→</i><span>ChatGPT models</span></p></div>
-          <div className={`account-chip${login.signedIn ? " ok" : ""}`}>
-            <span className="account-state"><i aria-hidden="true" />{login.pending ? "Waiting for sign-in" : login.signedIn ? "ChatGPT connected" : "ChatGPT not connected"}</span>
-            {login.pending ? <button className="text-button" onClick={() => void perform(async () => setLogin(await api.cancelLogin()))}>Cancel sign-in</button>
-              : <button className={login.signedIn ? "text-button" : "button primary small"} disabled={!native || !loaded || busy || session.running || !runtime.available} onClick={signIn}>{login.signedIn ? "Sign in again" : "Sign in with ChatGPT"}</button>}
-          </div>
+            <p className="flow-line" aria-label="Request flow"><span>Codex</span><i aria-hidden="true">→</i><strong>Switchyard</strong><i aria-hidden="true">→</i><span>{[...usedConnections(settings)].filter((id) => id !== "typesafe").map((id) => connectionInfo[id].name).join(" · ") || "No models yet"}</span></p></div>
         </section>
-        {login.pending && <div className="device-login" role="status"><span>Code</span><strong className="device-code">{login.code ?? "..."}</strong>{login.code && <p>Open <strong>https://auth.openai.com/codex/device</strong> in your browser and enter this code. Never share it.</p>}</div>}
-        <section className="route-panel" aria-label="Route">
-          <StrategyPicker settings={settings} disabled={locked} onPick={pickStrategy} />
-          {undo && <div className="switch-notice" role="status"><span>Switched from <strong>{undo.from}</strong>. Judge, extra targets and route TOML were reset; your models and roles stayed.</span><button type="button" className="text-button" onClick={() => { const previous = undo.settings; change(previous); }}>Undo</button></div>}
-          <div className="route-body">
-            <header className="route-body-head"><h2>Models</h2><p>Each card says what that model does in {selected.label}. Enter model IDs your ChatGPT plan offers; requests run through the ChatGPT account you sign in with above.</p></header>
-            <ModelDiscovery settings={settings} change={change} disabled={locked || !loaded} />
-            <RoutingEditor key={settings.algorithm} settings={settings} change={change} disabled={locked} />
-            <AdvancedSettings settings={settings} change={change} disabled={locked} />
-          </div>
-        </section>
+        <StrategyDeck settings={settings} disabled={locked} onPick={pickStrategy} hover={hoverStrategy} setHover={setHoverStrategy} />
+        {undo && <div className="switch-notice" role="status"><span>Switched from <strong>{undo.from}</strong>. Judge, extra targets and route TOML were reset; your models and roles stayed.</span><button type="button" className="text-button" onClick={() => { const previous = undo.settings; morph(() => change(previous)); }}>Undo</button></div>}
+        {legacy && <div className="switch-notice migration-notice" role="status"><span>Your saved setup keeps its billing: {servingTargets(settings).map((target, index) => <b key={index}>{servingTargets(settings).length > 2 ? `Target ${index + 1}` : (index ? "Capable" : "Efficient")} → {connectionInfo[connectionOf(settings, target)].name}</b>)}. Pick a model from another provider in any slot to change it.</span><button type="button" className="text-button" onClick={noteMigration}>Got it</button></div>}
+        <ConnectionStrip connections={connections} connected={connected} usage={usage} onHighlight={setHighlight} onManage={() => setPage("providers")} />
+        <ConnectionsContext.Provider value={{ connected, catalog, onConnect: () => setPage("providers") }}>
+          <fieldset disabled={locked} className="workbench-main"><legend className="sr-only">Routing configuration</legend>
+            <RouteCanvas key={settings.algorithm} settings={settings} change={change} disabled={locked} highlight={highlight} hover={hoverStrategy} />
+          </fieldset>
+        </ConnectionsContext.Provider>
+        <AdvancedSettings settings={settings} change={change} disabled={locked} />
         <section className="connect-panel" aria-label="Use it from Codex">
           <h2>Use it from Codex</h2>
           <ol className="connect-steps">
@@ -211,7 +229,11 @@ export function App() {
           <h2>Other integrations</h2>
           <ClaudeIntegration />
         </section>
-      </div> : page === "roles" ? <div className="config-page roles-page" key="roles">
+      </div> : page === "providers" ? <ProvidersPage settings={settings} change={change} connections={connections} login={login} disabled={locked || !loaded}
+          signInDisabled={!native || !loaded || busy || session.running || !runtime.available} onSignIn={signIn}
+          onCancelSignIn={() => void perform(async () => setLogin(await api.cancelLogin()))}
+          onSaveKey={saveKey} onRefresh={refreshConnection} onContinue={() => setPage("routing")} />
+      : page === "roles" ? <div className="config-page roles-page" key="roles">
         <section className="config-head"><div><h1>Roles</h1><p className="flow-line">The right model for each task. The right instructions for each model.</p></div></section>
         <RolesEditor settings={settings} change={change} disabled={locked} />
         <SetupTransfer settings={settings} disabled={locked || !loaded} onImport={(imported) => change(imported)} />

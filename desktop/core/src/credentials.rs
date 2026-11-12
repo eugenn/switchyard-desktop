@@ -12,15 +12,24 @@ use crate::Result;
 pub(crate) enum Credential {
     Typesafe,
     Anthropic,
+    OpenAi,
+    OpenRouter,
 }
 
 impl Credential {
-    const ALL: [Credential; 2] = [Credential::Typesafe, Credential::Anthropic];
+    const ALL: [Credential; 4] = [
+        Credential::Typesafe,
+        Credential::Anthropic,
+        Credential::OpenAi,
+        Credential::OpenRouter,
+    ];
 
     fn name(self) -> &'static str {
         match self {
             Credential::Typesafe => "typesafe",
             Credential::Anthropic => "anthropic",
+            Credential::OpenAi => "openai",
+            Credential::OpenRouter => "openrouter",
         }
     }
 
@@ -36,6 +45,8 @@ impl Credential {
         match self {
             Credential::Typesafe => "dev.switchyard.desktop.preview.typesafe",
             Credential::Anthropic => "dev.switchyard.desktop.preview.anthropic",
+            Credential::OpenAi => "dev.switchyard.desktop.preview.openai",
+            Credential::OpenRouter => "dev.switchyard.desktop.preview.openrouter",
         }
     }
 
@@ -43,11 +54,21 @@ impl Credential {
         match self {
             Credential::Typesafe => "TypeSafe",
             Credential::Anthropic => "Anthropic",
+            Credential::OpenAi => "OpenAI",
+            Credential::OpenRouter => "OpenRouter",
         }
     }
 }
 
 const ENTRY_ACCOUNT: &str = "api-key";
+
+fn provider_credential(provider: &str) -> Result<Credential> {
+    match provider {
+        "openai" => Ok(Credential::OpenAi),
+        "openrouter" => Ok(Credential::OpenRouter),
+        _ => Err("Unknown API key provider.".into()),
+    }
+}
 
 type Secrets = HashMap<Credential, String>;
 
@@ -120,6 +141,23 @@ impl CredentialVault {
 
     pub(crate) fn anthropic_key(&self) -> Result<Option<String>> {
         self.get(Credential::Anthropic)
+    }
+
+    /// Provider API keys for model targets: `openai` or `openrouter`.
+    pub fn set_provider_key(&self, provider: &str, key: &str) -> Result<()> {
+        self.set(provider_credential(provider)?, key)
+    }
+
+    pub fn has_provider_key(&self, provider: &str) -> Result<bool> {
+        self.has(provider_credential(provider)?)
+    }
+
+    pub(crate) fn openai_key(&self) -> Result<Option<String>> {
+        self.get(Credential::OpenAi)
+    }
+
+    pub(crate) fn openrouter_key(&self) -> Result<Option<String>> {
+        self.get(Credential::OpenRouter)
     }
 
     /// Presence check that never reads a secret, so it cannot ask for approval.
