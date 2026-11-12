@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { api, native, type ClaudeSettings, type RouteSettings } from "./api";
 import {
   activeSessionIDs, claudeProfile, compact, dollars, droppingHousekeepingThreads, estimateCost, compactShort, computeMetrics, contextUsage, durationText, group, isClaudeRecord, judgeColor, lanes as orderLanes, milliseconds, modelIDs as stableModelIDs,
@@ -85,17 +85,21 @@ export function Activity({ settings, stats: rawStats, statsError, running, onOpe
   const judgeModel = settings.judgeModel?.trim();
   const aliases: Record<string, string> = judgeModel ? { [`judge-${judgeModel}`]: judgeModel } : {};
   const cost = prices ? estimateCost(costRecords, prices, aliases) : null;
-  const emptyReason = records.length ? null : !running ? "Routing is off. Start routing, then send a Codex or Claude Code request." : "No routed turns yet. The log fills as Codex or Claude Code sends requests through the proxy.";
+  const logUnavailable = historyError !== "" && records.length === 0;
+  const emptyReason = records.length ? null : logUnavailable ? "The routing log could not be read, so no turns are shown." : !running ? "Routing is off. Start routing, then send a Codex or Claude Code request." : "No routed turns yet. The log fills as Codex or Claude Code sends requests through the proxy.";
+  // A model picked in another session has no lane here; never filter latency by it.
+  const visibleModelID = selectedModelID != null && metrics.shares.some((share) => share.id === selectedModelID) ? selectedModelID : null;
+  const failures = [statsError && `Statistics unavailable: ${statsError}`, historyError && `Routing log unavailable: ${historyError}`].filter(Boolean);
 
   return <div className="activity" key="activity">
-    {(statsError || historyError) && <div className="banner error" role="alert">{statsError ? `Statistics unavailable: ${statsError}` : `Routing log unavailable: ${historyError}`}</div>}
-    <Summary metrics={metrics} stats={stats} session={flowSession} lastRefresh={lastRefresh} cost={cost} pricesError={pricesError} />
+    {failures.length > 0 && <div className="banner error" role="alert"><span>{failures.map((text, index) => <Fragment key={text}>{index > 0 && <br />}{text}</Fragment>)}</span></div>}
+    <Summary metrics={metrics} stats={stats} session={flowSession} lastRefresh={lastRefresh} cost={cost} pricesError={pricesError} logUnavailable={logUnavailable} />
     <SignalBox metrics={metrics} modelIDs={modelIDs} isRouting={running} asOf={lastRefresh} usesClassifier={profile.usesClassifier} classifierModelID={profile.classifierModelID} client={isClaude ? "claude-code" : "codex"}
       roles={profile.roles} ticks={deriveTicks(records, flowSession?.id ?? null, metrics.windowStart, metrics.windowEnd)}
       context={flowSession ? contextUsage(records, flowSession.id, isClaude ? {} : settings, prices) : null} session={flowSession} sessions={sessions} active={active}
-      selectedModelID={selectedModelID} onSelectModel={setSelectedModelID} onSelectSession={setSelectedSessionID} onConfigure={onConfigure} />
+      selectedModelID={visibleModelID} onSelectModel={setSelectedModelID} onSelectSession={(id) => { setSelectedSessionID(id); setSelectedModelID(null); }} onConfigure={onConfigure} />
     <div className="activity-pair">
-      <LatencyCard stats={stats} modelIDs={modelIDs} selectedModelID={selectedModelID} onShowAll={() => setSelectedModelID(null)} />
+      <LatencyCard stats={stats} modelIDs={modelIDs} selectedModelID={visibleModelID} onShowAll={() => setSelectedModelID(null)} />
       <LatestTurns records={records} session={flowSession} modelIDs={modelIDs} roleOf={(record) => roleFor(record, profile)} emptyReason={emptyReason} onOpenRequests={onOpenRequests} />
     </div>
     <div className="stats-pair">
@@ -111,17 +115,21 @@ function Stat({ value, unit, label, tone, title }: { value: string; unit?: strin
   return <div className="act-stat" title={title}><strong style={tone ? { color: tone } : undefined}>{value}{unit && <small>{unit}</small>}</strong><span>{label}</span></div>;
 }
 
-function Summary({ metrics, stats, session, lastRefresh, cost, pricesError }: { metrics: Metrics; stats: ServerStats | null; session: Session | null; lastRefresh: number | null; cost: CostEstimate | null; pricesError: string }) {
+function Summary({ metrics, stats, session, lastRefresh, cost, pricesError, logUnavailable }: { metrics: Metrics; stats: ServerStats | null; session: Session | null; lastRefresh: number | null; cost: CostEstimate | null; pricesError: string; logUnavailable: boolean }) {
   const errors = stats?.totalErrors;
-  const warning = stats && stats.classifierErrors > 0 ? `${stats.classifierErrors} of ${stats.classifierRequests} classifier calls failed` : stats?.fallbacks[0] ? `fallback: ${stats.fallbacks[0][0]}` : null;
+  // The number is always the proxy's lifetime model errors; classifier failures and fallbacks are extra notes, never a new meaning for it.
+  const warning = stats && stats.classifierErrors > 0 ? `${stats.classifierErrors} classifier failed` : stats?.fallbacks[0] ? `fallback ${stats.fallbacks[0][0]}` : null;
+  const errorsTitle = ["Model errors the proxy returned since switchyard-server started, across every session.",
+    ...(stats && stats.classifierErrors > 0 ? [`${stats.classifierErrors} of ${stats.classifierRequests} classifier calls failed.`] : []),
+    ...(stats?.fallbacks ?? []).map(([name, count]) => `Fallback ${name}: ${count}.`)].join("\n");
   const scope = session ? "this session" : "the last 15 minutes";
   const started = session?.startedAt ?? null;
   return <section className="act-summary" aria-label="Summary">
-    <Stat value={group(metrics.count)} label={metrics.count === 1 ? "request routed" : "requests routed"}
-      title={metrics.secondsPerRequest == null ? `Turns routed in ${scope}.` : `Turns routed in ${scope}, one every ${metrics.secondsPerRequest.toFixed(1)} s.`} />
-    <Stat value={errors == null ? "—" : String(errors)} tone={(errors ?? 0) > 0 ? "var(--crit)" : undefined} title="Errors the proxy returned since switchyard-server started."
-      label={warning ? <em className="warn-text">{warning}</em> : errors == null ? "model errors" : <><i className="act-dot" style={{ background: errors > 0 ? "var(--crit)" : "var(--accent)" }} />{errors === 1 ? "model error" : "model errors"}</>} />
-    <Stat value={compact(metrics.tokens)} label={metrics.count > 0 ? `tokens · ${compactShort(Math.floor(metrics.tokens / metrics.count))} per turn` : "tokens"} />
+    <Stat value={logUnavailable ? "—" : group(metrics.count)} label={metrics.count === 1 ? "request routed" : "requests routed"}
+      title={logUnavailable ? "The routing log could not be read." : metrics.secondsPerRequest == null ? `Turns routed in ${scope}.` : `Turns routed in ${scope}, one every ${metrics.secondsPerRequest.toFixed(1)} s.`} />
+    <Stat value={errors == null ? "—" : String(errors)} tone={(errors ?? 0) > 0 ? "var(--crit)" : undefined} title={errorsTitle}
+      label={errors == null ? "model errors" : <><i className="act-dot" style={{ background: errors > 0 ? "var(--crit)" : "var(--accent)" }} />{errors === 1 ? "model error" : "model errors"} since start{warning && <> · <em className="warn-text">{warning}</em></>}</>} />
+    <Stat value={logUnavailable ? "—" : compact(metrics.tokens)} label={metrics.count > 0 ? `tokens · ${compactShort(Math.floor(metrics.tokens / metrics.count))} per turn` : "tokens"} />
     <Stat value={metrics.tokens > 0 ? percent(metrics.cachedTokens / metrics.tokens) : "—"} unit={metrics.tokens > 0 ? "%" : undefined} label="served from cache"
       title={metrics.cachedTokens > 0 ? `${group(metrics.cachedTokens)} of ${group(metrics.tokens)} prompt tokens were cache hits.` : "No cache hits in this window."} />
     <CostStat cost={cost} session={session} pricesError={pricesError} />
@@ -160,7 +168,11 @@ function SignalBox(props: SignalProps) {
   const isThinking = isRouting && !isLive && sinceLatest != null && sinceLatest <= 600;
   const latestModelID = latest && !latest.isClassifier ? latest.modelID : null;
   const span = session && session.startedAt != null && session.lastActivity != null ? (session.lastActivity - session.startedAt) / 1000 : null;
-  const windowLabel = !session ? "Last 15 minutes" : span == null || span < 1 ? "One session" : `This session · ${durationText(span)}`;
+  // The window ends at the session's last turn; only call that "now" while it is recent.
+  const idleSeconds = session ? ((asOf ?? metrics.windowEnd) - metrics.windowEnd) / 1000 : 0;
+  const endsNow = isRouting && idleSeconds <= 60;
+  const idle = session != null && idleSeconds >= 15 * 60 ? ` · idle ${durationText(idleSeconds)}` : "";
+  const windowLabel = !session ? "Last 15 minutes" : span == null || span < 1 ? `One session${idle}` : `This session · ${durationText(span)}${idle}`;
   const lanesHeight = lanes.length * LANE + Math.max(lanes.length - 1, 0) * GAP;
   const body = Math.max(MIN_BODY, lanesHeight + 24);
   const center = body / 2;
@@ -216,7 +228,7 @@ function SignalBox(props: SignalProps) {
         </div>
       </div>
       <div className="signal-axis" style={{ paddingLeft: 16 + SOURCE + RAIL + LABEL + 4, paddingRight: 14 + 18 + (showsContext ? CONTEXT + 12 : 0) }}>
-        <span>{shortTime(metrics.windowStart)}</span><span className="caption">each tick is one turn · taller means more tokens</span><span>{isRouting ? "now" : shortTime(metrics.windowEnd)}</span>
+        <span>{shortTime(metrics.windowStart)}</span><span className="caption">each tick is one turn · taller means more tokens</span><span>{endsNow ? "now" : shortTime(metrics.windowEnd)}</span>
       </div>
     </>}
   </section>;
