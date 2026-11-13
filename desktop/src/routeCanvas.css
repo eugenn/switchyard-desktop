@@ -116,6 +116,9 @@
 .node{position:relative;display:flex;flex-direction:column;gap:8px;padding:12px;border:1px solid var(--line-strong);border-radius:12px;background:linear-gradient(180deg,rgba(255,255,255,.025),transparent 60%),#101514;box-shadow:0 12px 30px -20px #000;transition:border-color .2s,box-shadow .3s var(--ease),opacity .3s,transform .25s var(--ease);animation:node-in .45s var(--ease) both}
 .slot-col .node:nth-child(2){animation-delay:.05s}.slot-col .node:nth-child(3){animation-delay:.1s}.slot-col .node:nth-child(4){animation-delay:.15s}
 @keyframes node-in{from{opacity:0;transform:translateY(8px) scale(.98)}to{opacity:1;transform:none}}
+/* each node is its own stacking context (animation + position), so lift the one whose picker is open above its siblings */
+/* :focus-within is the reliable trigger in WebKit (the Tauri webview), where :has() does not always re-stack when the menu appears */
+.node:focus-within,.node:has(.connection-menu),.node:has(.model-menu){z-index:6}
 .node header{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px}
 .node .slot-name{flex:1;font-size:13.5px}
 .node .slot-job{font-size:12px;line-height:1.45}

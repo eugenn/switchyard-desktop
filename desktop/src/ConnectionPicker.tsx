@@ -1,4 +1,4 @@
-import { createContext, useId, useMemo, useState } from "react";
+import { createContext, useId, useMemo, useRef, useState } from "react";
 import { connectionIds, connectionInfo, type AvailableModel, type ConnectionId } from "./api";
 
 export type Catalog = Partial<Record<ConnectionId, AvailableModel[]>>;
@@ -20,6 +20,7 @@ export function ConnectionPicker({ label, connection, model, connected, catalog,
   // Opening shows every model; typing narrows the list.
   const [typed, setTyped] = useState(false);
   const menu = useId();
+  const field = useRef<HTMLInputElement>(null);
   const query = model.trim().toLowerCase();
   const groups = useMemo(() => connectionIds.filter((id) => connected.has(id)).map((id) => ({
     id, models: (catalog[id] ?? []).filter((item) => !typed || !query || item.id.toLowerCase().includes(query) || item.displayName.toLowerCase().includes(query)).slice(0, 60),
@@ -32,10 +33,10 @@ export function ConnectionPicker({ label, connection, model, connected, catalog,
   return <div className={`connection-picker${offline ? " offline" : ""}`}>
     <button type="button" className={`connection-pill ${connection}`} tabIndex={-1} aria-label={`${label}: ${connectionInfo[connection].name}${offline ? ", not connected" : ""}. Change`}
       title={offline ? `${connectionInfo[connection].name} is not connected` : `${connectionInfo[connection].name} · billed ${connectionInfo[connection].billing === "Plan" ? "to your plan" : "per token"}`}
-      onMouseDown={(event) => { event.preventDefault(); setOpen(!open); }}>
+      onMouseDown={(event) => { event.preventDefault(); field.current?.focus(); setTyped(false); setOpen(!open); }}>
       <i aria-hidden="true" />{connectionInfo[connection].short}
     </button>
-    <input role="combobox" aria-label={label} aria-invalid={invalid} aria-expanded={shown} aria-controls={menu} aria-autocomplete="list"
+    <input ref={field} role="combobox" aria-label={label} aria-invalid={invalid} aria-expanded={shown} aria-controls={menu} aria-autocomplete="list"
       aria-activedescendant={shown && active >= 0 ? `${menu}-${active}` : undefined}
       autoComplete="off" spellCheck={false} placeholder={placeholder} value={model}
       onChange={(event) => { onChange({ connection, model: event.target.value }); setOpen(true); setTyped(true); setActive(-1); }}
